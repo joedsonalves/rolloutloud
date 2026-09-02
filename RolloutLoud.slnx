@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RolloutLoud.App/RolloutLoud.App.csproj" />
+    <Project Path="src/RolloutLoud.Cli/RolloutLoud.Cli.csproj" />
+    <Project Path="src/RolloutLoud.Core/RolloutLoud.Core.csproj" />
+    <Project Path="src/RolloutLoud.Platform.Unix/RolloutLoud.Platform.Unix.csproj" />
+    <Project Path="src/RolloutLoud.Platform.Windows/RolloutLoud.Platform.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RolloutLoud.Core.Tests/RolloutLoud.Core.Tests.csproj" />
+  </Folder>
+</Solution>

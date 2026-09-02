@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Core never references a UI toolkit. Not Avalonia, not WPF, not System.Drawing.
+       Everything here has to be runnable from a test with no window and no display. -->
+  <PropertyGroup>
+    <RootNamespace>RolloutLoud.Core</RootNamespace>
+  </PropertyGroup>
+
+</Project>
