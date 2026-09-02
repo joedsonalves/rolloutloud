@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Targets plain net10.0, not net10.0-windows, so the cross-platform App can reference it
+       unconditionally. The Windows-only APIs inside are guarded with [SupportedOSPlatform] and
+       never reached on another OS: PlatformServices only constructs this when the host is
+       actually Windows. -->
+  <PropertyGroup>
+    <RootNamespace>RolloutLoud.Platform.Windows</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RolloutLoud.Core\RolloutLoud.Core.csproj" />
+  </ItemGroup>
+
+</Project>
