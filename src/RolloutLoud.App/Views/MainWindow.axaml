@@ -85,7 +85,7 @@
 
               <TextBox Text="{Binding Objective}"
                        AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90"
-                       Watermark="attack within scope until you land a critical" />
+                       PlaceholderText="attack within scope until you land a critical" />
 
               <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
                 <TextBlock Grid.Column="0" Text="Run on" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
@@ -102,12 +102,12 @@
               <TextBlock Classes="hint"
                          Text="Without a machine check, the agent decides for itself when it is done — and a tired agent decides that early. With one, RolloutLoud runs it, then runs it again from a clean process before believing it." />
 
-              <TextBox Text="{Binding GateDescription}" Watermark="in your words: a reproducible critical with a working PoC" />
+              <TextBox Text="{Binding GateDescription}" PlaceholderText="in your words: a reproducible critical with a working PoC" />
 
               <CheckBox IsChecked="{Binding GateIsCommand}" Content="Decide it with a command (exit 0 means achieved)" />
               <TextBox Text="{Binding GateCommand}" IsEnabled="{Binding GateIsCommand}"
                        FontFamily="Consolas,Menlo,monospace"
-                       Watermark="python verify_finding.py --severity critical" />
+                       PlaceholderText="python verify_finding.py --severity critical" />
             </StackPanel>
           </Border>
 
@@ -120,10 +120,10 @@
 
               <TextBox Text="{Binding ScopeTargets}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="52"
                        FontFamily="Consolas,Menlo,monospace"
-                       Watermark="app.example.com, 10.0.4.0/24, *.staging.example.com" />
+                       PlaceholderText="app.example.com, 10.0.4.0/24, *.staging.example.com" />
 
               <TextBox Text="{Binding ScopeAuthorization}"
-                       Watermark="who authorised this, and under what reference" />
+                       PlaceholderText="who authorised this, and under what reference" />
 
               <TextBlock Text="{Binding ScopeWarning}" Foreground="#E0A030" FontSize="11" TextWrapping="Wrap"
                          IsVisible="{Binding ScopeWarning, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
