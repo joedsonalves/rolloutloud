@@ -26,6 +26,19 @@ public sealed record WatchdogSettings
 
     /// <summary>Total rounds, as a last-resort ceiling independent of the mission's own budget.</summary>
     public int MaxRounds { get; init; } = 100;
+
+    /// <summary>
+    /// Wait out a spent token allowance and carry on, rather than treating it as a dead end.
+    /// </summary>
+    /// <remarks>
+    /// On by default. A session running out of allowance mid-run is ordinary — these are hourly
+    /// or multi-hour windows and a six-hour mission will cross one — and the alternative is
+    /// abandoning a run that was going fine because the clock ran out rather than the ideas.
+    /// </remarks>
+    public bool WaitOutQuotaLimits { get; init; } = true;
+
+    /// <summary>Longest single quota wait. Beyond this the run stops rather than sleeping all day.</summary>
+    public TimeSpan MaxQuotaWait { get; init; } = TimeSpan.FromHours(6);
 }
 
 public sealed record WatchdogEvent(DateTimeOffset At, string Kind, string Message);
@@ -154,8 +167,8 @@ public sealed class AgentSupervisor : IAsyncDisposable
             var ledgerBefore = mission.Ledger.Count;
 
             var prompt = Round == 1
-                ? BriefingComposer.ForMainSession(mission.Mission, mission.Ledger)
-                : BriefingComposer.ForMainSession(mission.Mission, mission.Ledger)
+                ? BriefingComposer.ForMainSession(mission.Mission, mission.Ledger, _host.HasAttachedIdentity)
+                : BriefingComposer.ForMainSession(mission.Mission, mission.Ledger, _host.HasAttachedIdentity)
                   + Environment.NewLine + Environment.NewLine + Continuation(mission);
 
             Log("round", $"Round {Round} — tier {mission.Mission.EscalationTier} " +
@@ -180,6 +193,46 @@ public sealed class AgentSupervisor : IAsyncDisposable
             await PersistRoundAsync(run, cancellationToken).ConfigureAwait(false);
 
             var learned = mission.Ledger.Count - ledgerBefore;
+            var transcript = run.StandardOutput + run.StandardError;
+
+            // Out of allowance is not out of ideas, and the two look identical from here: the
+            // agent stopped mid-work and the round produced nothing. Handled before the barren
+            // counter so a crossed usage window cannot be mistaken for a broken setup — three of
+            // those in a row would otherwise end a run that was going perfectly well.
+            var quota = QuotaDetector.Inspect(transcript);
+            if (quota.Exhausted && Settings.WaitOutQuotaLimits)
+            {
+                var wait = QuotaDetector.WaitFor(quota, DateTimeOffset.Now);
+
+                if (wait > Settings.MaxQuotaWait)
+                {
+                    Log("quota",
+                        $"The session is out of allowance and the window does not reopen for {wait:g}, " +
+                        $"which is past the {Settings.MaxQuotaWait:g} ceiling. Stopping — resume when it is back.");
+                    return;
+                }
+
+                Log("quota",
+                    $"Out of allowance (\"{quota.Phrase}\"). " +
+                    (quota.ResetsAt is { } at
+                        ? $"Waiting until {at:HH:mm} plus a minute, {Describe(wait)} from now."
+                        : $"No reset time given, so waiting {Describe(wait)} and trying again.") +
+                    " This round does not count as barren; the mission is intact and the ledger is kept.");
+
+                try
+                {
+                    await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                Log("quota", "Allowance window should be open. Continuing.");
+                Round--;  // the wall was not an attempt
+                continue;
+            }
+
             barrenRounds = learned > 0 ? 0 : barrenRounds + 1;
 
             // Ask the gate before deciding anything else. If the round actually succeeded, the
@@ -199,7 +252,7 @@ public sealed class AgentSupervisor : IAsyncDisposable
                 }
             }
 
-            var signal = GiveUpDetector.Inspect(run.StandardOutput + run.StandardError);
+            var signal = GiveUpDetector.Inspect(transcript);
 
             if (signal.ShouldRestart)
             {
@@ -312,6 +365,12 @@ public sealed class AgentSupervisor : IAsyncDisposable
         Environment.NewLine + Environment.NewLine +
         $"Current tier — **{EscalationLadder.NameOf(mission.Mission.EscalationTier)}**: " +
         EscalationLadder.InstructionFor(mission.Mission.EscalationTier);
+
+    /// <summary>A duration a person reads at a glance, without a format string full of escapes.</summary>
+    private static string Describe(TimeSpan wait) =>
+        wait.TotalMinutes < 1 ? $"{wait.TotalSeconds:0}s"
+        : wait.TotalHours < 1 ? $"{wait.TotalMinutes:0} min"
+        : $"{wait.TotalHours:0.#} h";
 
     private void Log(string kind, string message)
     {
