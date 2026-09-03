@@ -71,6 +71,8 @@
   "offload.always": "Always, from the first action",
   "offload.enable": "Execute actions through subagents",
   "offload.hint": "For long grinds. The main session keeps the mission and the ledger and spends its window on judgement; each concrete action goes to a fresh subagent with a short briefing and returns a structured verdict. Stops the cost per action climbing with the hour.",
+  "offload.reading.hint": "The agent does not judge this. RolloutLoud reads the CLI's own transcript where it can — those are the numbers the API counted — and falls back to counting what it sent where it cannot. A reading marked estimated is characters over four and can be out by a fair margin.",
+  "offload.reading.none": "No reading yet for this agent.",
   "offload.threshold": "Only once the window gets expensive",
   "offload.thresholdLabel": "threshold (tokens)",
   "offload.title": "Subagent offload",

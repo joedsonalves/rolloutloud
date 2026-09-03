@@ -1,5 +1,6 @@
 using RolloutLoud.Core.Agents;
 using RolloutLoud.Core.Buttons;
+using RolloutLoud.Core.Context;
 using RolloutLoud.Core.Elevation;
 using RolloutLoud.Core.Execution;
 using RolloutLoud.Core.Missions;
@@ -36,6 +37,7 @@ public sealed class RolloutHost
 
         Store = new MissionStore(paths);
         Housekeeping = new Housekeeper(paths);
+        Context = new ContextMeter();
 
         foreach (var record in Store.LoadAll())
         {
@@ -55,6 +57,13 @@ public sealed class RolloutHost
     }
 
     public Housekeeper Housekeeping { get; }
+
+    /// <summary>How large each agent's window has become. See <see cref="ContextMeter"/>.</summary>
+    public ContextMeter Context { get; }
+
+    /// <summary>Whether concrete actions should be going to subagents right now.</summary>
+    public OffloadDecision OffloadNow(Mission mission) =>
+        Context.ShouldOffload(mission, Paths.RepositoryRoot);
 
     /// <summary>What the last tidy found and removed. Shown in the window.</summary>
     public HousekeepingReport? LastHousekeeping { get; private set; }
@@ -378,6 +387,11 @@ public sealed class RolloutHost
             var briefing = Offload.BriefingComposer.ForMainSession(mission.Mission, mission.Ledger, HasAttachedIdentity);
             var target = Path.Combine(Paths.RepositoryRoot, agent.InstructionFile);
             WriteBriefingSection(target, briefing);
+
+            // A launch is a fresh session, so the running estimate starts over rather than
+            // carrying the previous one's total into a window that no longer holds it.
+            Context.Reset(agent.Id);
+            Context.RecordSent(agent.Id, briefing);
         }
 
         ProcessLauncher.Launch(new LaunchRequest

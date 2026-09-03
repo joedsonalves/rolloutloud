@@ -194,6 +194,24 @@ public sealed record BriefingResponse
     public required bool OffloadActive { get; init; }
 }
 
+/// <summary>How big the window has become, and what to do about it.</summary>
+public sealed record ContextResponse
+{
+    public required int Tokens { get; init; }
+
+    /// <summary>measured | estimated | unknown — the two are not interchangeable.</summary>
+    public required string Source { get; init; }
+
+    public required string Detail { get; init; }
+
+    /// <summary>Whether concrete actions should be going to subagents right now.</summary>
+    public required bool OffloadNow { get; init; }
+
+    public required string Reason { get; init; }
+
+    public int Threshold { get; init; }
+}
+
 /// <summary>The main agent handing one step down to a fresh process.</summary>
 public sealed record SubagentRequest
 {

@@ -82,7 +82,11 @@ public static class BriefingComposer
             sb.AppendLine(
                 mission.Offload.Trigger == OffloadTrigger.Always
                     ? "Every concrete action goes to a subagent."
-                    : $"Once your context passes ~{mission.Offload.TokenThreshold:N0} tokens, every concrete action goes to a subagent.");
+                    : "Past a size threshold, every concrete action goes to a subagent. **You do not " +
+                      "judge when that is.** Ask `GET /v1/missions/active/context` before an action; " +
+                      "it reads your CLI's own transcript where it can and answers `offloadNow` " +
+                      "true or false. Estimating your own window is guesswork, and guessing low is " +
+                      "the expensive mistake.");
             sb.AppendLine();
             sb.AppendLine(
                 "Spend your own window on judgement — what to try next, and what the results mean — " +

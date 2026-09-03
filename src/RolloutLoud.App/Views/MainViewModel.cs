@@ -322,6 +322,27 @@ public sealed class MainViewModel : Observable
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// The live context reading for the current mission's agent.
+    /// </summary>
+    /// <remarks>
+    /// Shown next to the threshold because a threshold without a reading is a number with nothing
+    /// to compare it against — which is exactly what it was before the meter existed.
+    /// </remarks>
+    public string ContextReadingSummary
+    {
+        get
+        {
+            if (_mission is null)
+            {
+                return Localizer.Current["offload.reading.none"];
+            }
+
+            var decision = _host.OffloadNow(_mission.Mission);
+            return decision.Reading.HasNumber ? decision.Reason : Localizer.Current["offload.reading.none"];
+        }
+    }
+
     // ---- housekeeping -----------------------------------------------------------------------
 
     /// <summary>
@@ -930,6 +951,7 @@ public sealed class MainViewModel : Observable
     {
         Raise(nameof(MissionSummary));
         Raise(nameof(RelayHistory));
+        Raise(nameof(ContextReadingSummary));
         Raise(nameof(PauseLabel));
         PauseMission.RaiseCanExecuteChanged();
         AbortMission.RaiseCanExecuteChanged();

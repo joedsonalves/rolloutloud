@@ -194,6 +194,11 @@ public sealed class SubagentRunner
             .Select(a => a.Replace("{prompt}", briefing, StringComparison.Ordinal))
             .ToList();
 
+        // Counted against the SUBAGENT, not the caller. That is the whole point of offload: the
+        // briefing is what the fresh process pays for, and the main session pays only for the few
+        // lines that come back.
+        _host.Context.RecordSent(agent.Id, briefing);
+
         Logged?.Invoke($"Subagent ({agent.Id}): {Truncate(task, 90)}");
 
         var started = DateTimeOffset.UtcNow;

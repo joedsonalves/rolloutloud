@@ -168,6 +168,9 @@
                   <TextBlock Grid.Column="0" Text="{loc:Tr Key=offload.thresholdLabel}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
                   <NumericUpDown Grid.Column="1" MinWidth="175" Value="{Binding TokenThreshold}" Increment="10000" Minimum="1000" Maximum="1000000" FormatString="0" />
                 </Grid>
+
+                <TextBlock Text="{loc:Tr Key=offload.reading.hint}" Classes="hint" />
+                <TextBlock Text="{Binding ContextReadingSummary}" Classes="hint mono" TextWrapping="Wrap" />
               </StackPanel>
             </StackPanel>
           </Border>

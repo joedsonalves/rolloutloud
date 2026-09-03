@@ -71,6 +71,8 @@
   "offload.always": "Siempre, desde la primera acción",
   "offload.enable": "Ejecutar acciones mediante subagentes",
   "offload.hint": "Para trabajos largos. La sesión principal conserva la misión y el registro y gasta su ventana en juicio; cada acción concreta va a un subagente nuevo con un briefing corto y devuelve un veredicto estructurado. Evita que el coste por acción suba con las horas.",
+  "offload.reading.hint": "El agente no juzga esto. RolloutLoud lee el transcrito del propio CLI cuando puede — son los números que contó la API — y recurre a contar lo que él mismo envió cuando no. Una lectura marcada como estimada es caracteres entre cuatro y puede desviarse bastante.",
+  "offload.reading.none": "Aún sin lectura para este agente.",
   "offload.threshold": "Solo cuando la ventana se encarezca",
   "offload.thresholdLabel": "umbral (tokens)",
   "offload.title": "Descarga a subagentes",
