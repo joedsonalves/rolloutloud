@@ -18,6 +18,9 @@ public enum GateWeakness
 
     /// <summary>The gate asks a model. That is the judgement the gate exists to replace.</summary>
     JudgedByAModel,
+
+    /// <summary>A filtered test run that selects nothing, and so passes before the work exists.</summary>
+    PassesOnNothing,
 }
 
 public enum GateConcern
@@ -137,12 +140,77 @@ public static class GateCritique
         var segments = Split(command);
 
         Neutralised(command, segments, findings);
+        PassesOnNothing(segments, findings);
         SelfCertifying(segments, findings);
         Circular(command, findings);
         AsksAModel(segments, findings);
 
         return Compose(findings);
     }
+
+    /// <summary>
+    /// A test run narrowed to something that does not exist yet.
+    /// </summary>
+    /// <remarks>
+    /// The sharpest version of "already satisfied", and it hides inside the most respectable gate
+    /// there is. <c>dotnet test --filter CheckoutFlakeTests</c> reads as exactly the right finish
+    /// line for a mission whose job is to write <c>CheckoutFlakeTests</c> — and it <b>exits 0
+    /// today</b>, because a filter matching nothing is not an error to the VSTest runner. The gate
+    /// is satisfied, re-verified from a clean process, satisfied again, and the mission is
+    /// <see cref="MissionState.Achieved"/> without a line of work.
+    ///
+    /// <b>Measured, not assumed, and the measurement is why this is narrow.</b> On this machine
+    /// <c>dotnet test --filter NoSuchThing</c> exits 0, while <c>pytest -k NoSuchThing</c> exits 5.
+    /// The behaviour is per-runner, so warning about every filtered test run would be crying wolf
+    /// at pytest to catch dotnet — and a checker that warns about everything is one the operator
+    /// learns to click past, which is worse than no checker at all.
+    ///
+    /// So only the case that was actually measured is flagged, and the finding names the exact
+    /// remedy rather than gesturing at the problem.
+    /// </remarks>
+    private static void PassesOnNothing(IReadOnlyList<Segment> segments, List<GateFinding> findings)
+    {
+        foreach (var segment in segments)
+        {
+            if (!Verb(segment.Text).Equals("dotnet", StringComparison.OrdinalIgnoreCase) ||
+                !Word(segment.Text, "test") ||
+                !Word(segment.Text, "--filter"))
+            {
+                continue;
+            }
+
+            // The one flag that turns "nothing matched" into a failure. With it, this gate is
+            // exactly right — so finding it means there is nothing to say.
+            if (segment.Text.Contains("TreatNoTestsAsError", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            findings.Add(new GateFinding
+            {
+                Weakness = GateWeakness.PassesOnNothing,
+                Concern = GateConcern.Serious,
+                Detail =
+                    "`dotnet test --filter` exits 0 when the filter matches nothing, so this gate " +
+                    "passes today — before the test it names exists. If the mission is to write " +
+                    "that test, the gate is satisfied by doing nothing at all. Add " +
+                    "`-- RunConfiguration.TreatNoTestsAsError=true` and it exits 1 until the test " +
+                    "is really there.",
+                Fragment = segment.Text,
+            });
+        }
+    }
+
+    /// <summary>Whether a command line contains a word on its own, rather than inside another.</summary>
+    /// <remarks>
+    /// ⚠️ A substring check reads <c>dotnet build --no-restore</c> as containing "test" via
+    /// "latest", and <c>--filter-none</c> as "--filter". Both are false positives on a warning the
+    /// operator is meant to take seriously.
+    /// </remarks>
+    private static bool Word(string segment, string word) =>
+        segment
+            .Split([' ', '\t', '='], StringSplitOptions.RemoveEmptyEntries)
+            .Any(w => w.Equals(word, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// The gate that reads as rigorous and cannot fail.
