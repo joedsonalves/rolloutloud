@@ -74,6 +74,26 @@ public sealed record Mission
     public string? Resolution { get; init; }
 
     public bool IsTerminal => State is MissionState.Achieved or MissionState.Exhausted or MissionState.Aborted;
+
+    /// <summary>
+    /// A new mission id: a sortable timestamp plus eight random characters.
+    /// </summary>
+    /// <remarks>
+    /// The suffix is not decoration. The timestamp alone has second resolution, and missions are
+    /// keyed by id in a dictionary — so two created in the same second collided and the second
+    /// silently REPLACED the first. That is not hypothetical: it happened the first time an agent
+    /// opened two missions in one script, and the symptom was a mission that simply was not in the
+    /// list, with no error anywhere.
+    ///
+    /// The timestamp stays first so ids still sort chronologically and read as a date.
+    ///
+    /// Eight characters rather than four, and the extra four are not superstition: at four hex
+    /// characters the birthday bound puts two hundred ids in one second at roughly a 26% chance
+    /// of a collision, which the test caught on its first run. Eight brings that below one in a
+    /// million and costs four bytes.
+    /// </remarks>
+    public static string NewId() =>
+        "m-" + DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8];
 }
 
 /// <summary>
