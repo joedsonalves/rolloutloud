@@ -18,12 +18,16 @@ namespace RolloutLoud.Core.Workspace;
 /// - **It is never folded into a briefing.** The agent has to ask, naming the site, which is what
 ///   produces an audit trail. Injecting it into every briefing would put the operator's email
 ///   into the context of every round whether it was needed or not.
-/// - **It does not hold passwords or payment details.** Fields are for identity, not for
-///   credentials. An agent that needs a secret should ask for a fluid button so the operator runs
-///   the privileged step themselves.
 /// - **It does not pretend to be secure.** This is plaintext on disk, readable by anything running
 ///   as the operator, and every read is sent to a model provider as part of the agent's context.
-///   The file says so, and so does the documentation.
+///   The file says so, the window says so, and the CLI says so when it writes the file.
+///
+/// A throwaway password for a test account is a legitimate thing to keep here — that is what
+/// disposable accounts are for, and refusing to carry one would just push the operator into
+/// pasting it into a chat instead, which is worse. What does not belong here is anything whose
+/// leak costs something: payment details, a password reused anywhere real, recovery codes, API
+/// keys with spend attached. The warning names those specifically rather than saying "no
+/// secrets", because a blanket rule that gets ignored protects nothing.
 ///
 /// <see cref="AllowedSites"/> is the same idea as the mission scope: the agent may only be handed
 /// the identity for a site the operator listed in advance.
@@ -49,7 +53,13 @@ public sealed record AttachedIdentity
     /// </remarks>
     public IReadOnlyList<string> AllowedSites { get; init; } = [];
 
-    /// <summary>The details themselves. Names are the operator's to choose.</summary>
+    /// <summary>
+    /// The details themselves. Names are the operator's to choose.
+    /// </summary>
+    /// <remarks>
+    /// A throwaway password belongs here when the mission needs a disposable account. Anything
+    /// whose leak costs money or reaches a real account does not — see the type remarks.
+    /// </remarks>
     public IReadOnlyDictionary<string, string> Fields { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -117,14 +127,16 @@ public sealed record AttachedIdentity
             Note =
                 "Details an agent may use to sign up on the sites listed below. Delete this file to " +
                 "withdraw it — with no file, agents are told not to create accounts at all. " +
-                "This is plaintext on disk, and anything read from it becomes part of the agent's " +
-                "context, which means it reaches the model provider. Do not put passwords, payment " +
-                "details or recovery codes here.",
+                "PLAINTEXT ON DISK: everything read from here becomes part of an agent's context, " +
+                "which means it reaches the model provider. A throwaway password for a disposable " +
+                "test account is fine — that is what this is for. Payment details, a password you " +
+                "use anywhere real, recovery codes and API keys with spend attached are not.",
             AllowedSites = ["app.staging.example.com"],
             Fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["email"] = "you+rolloutloud@example.com",
                 ["displayName"] = "Test Account",
+                ["password"] = "a throwaway you do not use anywhere else",
             },
         };
 

@@ -39,6 +39,19 @@ public sealed record WatchdogSettings
 
     /// <summary>Longest single quota wait. Beyond this the run stops rather than sleeping all day.</summary>
     public TimeSpan MaxQuotaWait { get; init; } = TimeSpan.FromHours(6);
+
+    /// <summary>
+    /// Hand the mission to a different CLI when the ladder reaches tier 3.
+    /// </summary>
+    /// <remarks>
+    /// On by default, because it is the rung with the best return and it is useless if it needs
+    /// somebody awake to trigger it — the whole point of a tier-3 escalation is that it happens at
+    /// 3am, when the current agent has run out of habits and nobody is watching.
+    /// </remarks>
+    public bool RelayBetweenAgents { get; init; } = true;
+
+    /// <summary>How long the outgoing agent gets to write its handoff note.</summary>
+    public TimeSpan HandoffTimeout { get; init; } = TimeSpan.FromMinutes(4);
 }
 
 public sealed record WatchdogEvent(DateTimeOffset At, string Kind, string Message);
@@ -161,6 +174,24 @@ public sealed class AgentSupervisor : IAsyncDisposable
             {
                 Log("finished", decision.Reason);
                 return;
+            }
+
+            // Tier 3 is "hand it to somebody else", so it is acted on here rather than described
+            // in a briefing the current agent would have to act on itself. A successful relay
+            // restarts the loop with the new agent; nobody to hand to moves the ladder to tier 4
+            // instead of spinning on a rung it cannot climb.
+            if (Settings.RelayBetweenAgents &&
+                mission.Mission.EscalationTier == 3 &&
+                mission.Mission.State == MissionState.Running)
+            {
+                var relayed = await TryRelayAsync(mission, agent, cancellationToken).ConfigureAwait(false);
+                if (relayed is not null)
+                {
+                    agent = relayed;
+                    AgentId = agent.Id;
+                    barrenRounds = 0;
+                    continue;
+                }
             }
 
             Round++;
@@ -287,10 +318,91 @@ public sealed class AgentSupervisor : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Collects a handoff note from the outgoing agent, then moves the mission.
+    /// </summary>
+    /// <remarks>
+    /// The note is asked for BEFORE the relay, while the agent that has the context still exists.
+    /// The ledger records what was tried; only the agent that tried it can say what it came to
+    /// believe and which of its own assumptions it stopped trusting, and those are the two things
+    /// somebody picking the problem up cold would ask for first.
+    ///
+    /// A failed or empty note is not a reason to skip the relay. The handoff is the valuable part;
+    /// the note is a bonus, and an agent too stuck to write one is exactly the agent that should
+    /// be handing over.
+    /// </remarks>
+    private async Task<AgentDescriptor?> TryRelayAsync(
+        MissionEngine mission,
+        AgentDescriptor current,
+        CancellationToken cancellationToken)
+    {
+        var choice = RelayPlanner.ChooseNext(mission.Mission, _host.Agents);
+
+        if (!choice.CanRelay)
+        {
+            Log("relay-blocked", choice.Reason + " Moving to the operator-consult tier instead.");
+            mission.ForceTier(EscalationLadder.MaxTier);
+            return null;
+        }
+
+        var next = _host.FindAgent(choice.AgentId!);
+        if (next is null)
+        {
+            return null;
+        }
+
+        Log("relay", choice.Reason);
+
+        var note = await AskForHandoffAsync(mission, current, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(note))
+        {
+            Log("relay", "No handoff note came back. Relaying anyway — the ledger goes either way.");
+        }
+
+        mission.RelayTo(next.Id, note);
+        return next;
+    }
+
+    private async Task<string?> AskForHandoffAsync(
+        MissionEngine mission,
+        AgentDescriptor current,
+        CancellationToken cancellationToken)
+    {
+        var prompt =
+            "You are handing this mission to a different agent, and this paragraph is the only " +
+            "thing you get to tell them. The ledger goes with it, so do not summarise what you " +
+            "tried — they can read that." + Environment.NewLine + Environment.NewLine +
+            "Write one paragraph and nothing else:" + Environment.NewLine +
+            "  - what you now BELIEVE about this problem that is not obvious from the attempts;" +
+            Environment.NewLine +
+            "  - which of your own assumptions you stopped trusting, and what made you stop." +
+            Environment.NewLine + Environment.NewLine +
+            "Objective: " + mission.Mission.Objective + Environment.NewLine + Environment.NewLine +
+            mission.Ledger.Summarize(20);
+
+        try
+        {
+            var run = await RunRoundAsync(current, prompt, cancellationToken, Settings.HandoffTimeout)
+                .ConfigureAwait(false);
+
+            var note = run.StandardOutput.Trim();
+
+            // Capped: an agent asked for a paragraph sometimes returns a transcript, and this text
+            // goes into every future briefing for the rest of the mission.
+            return note.Length <= 1500 ? note : note[..1500] + "…";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log("relay", "Could not collect a handoff note: " + ex.Message);
+            return null;
+        }
+    }
+
     private async Task<CapturedRun> RunRoundAsync(
         AgentDescriptor agent,
         string prompt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan? timeout = null)
     {
         var arguments = agent.PromptArguments
             .Select(a => a.Replace("{prompt}", prompt, StringComparison.Ordinal))
@@ -311,7 +423,7 @@ public sealed class AgentSupervisor : IAsyncDisposable
                     ["ROLLOUTLOUD_SUPERVISED"] = "1",
                 },
             },
-            Settings.RoundTimeout,
+            timeout ?? Settings.RoundTimeout,
             cancellationToken).ConfigureAwait(false);
     }
 

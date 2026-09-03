@@ -64,6 +64,24 @@ public sealed record Mission
     /// </remarks>
     public int TierChangedAtAttempt { get; init; }
 
+    /// <summary>Agents that have already worked this mission, oldest first.</summary>
+    /// <remarks>
+    /// Kept so the relay never rotates back to a model whose habits already got stuck — and,
+    /// because the ledger forbids its own spent attempts, would arrive with fewer moves than it
+    /// had the first time.
+    /// </remarks>
+    public IReadOnlyList<string> RelayHistory { get; init; } = [];
+
+    /// <summary>
+    /// What the outgoing agent wanted the next one to know.
+    /// </summary>
+    /// <remarks>
+    /// The ledger says what was tried; this says what the previous agent came to BELIEVE, and
+    /// which of its own assumptions it stopped trusting. Those are the two things a ledger cannot
+    /// carry, and they are what someone picking the problem up cold would ask for first.
+    /// </remarks>
+    public string? HandoffNote { get; init; }
+
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 
     public DateTimeOffset? StartedAt { get; init; }

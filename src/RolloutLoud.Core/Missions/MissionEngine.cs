@@ -87,12 +87,54 @@ public sealed class MissionEngine
         Persist();
     }
 
-    /// <summary>Reassigns the mission to another CLI, carrying the ledger across. Tier 3 of the ladder.</summary>
-    public void RelayTo(string agentId)
+    /// <summary>
+    /// Moves the ladder straight to a tier, for when a rung turns out to be unclimbable.
+    /// </summary>
+    /// <remarks>
+    /// The one caller is the relay finding nobody to hand to. Without it the run sits at tier 3 —
+    /// an instruction to hand off that cannot be carried out — and every later escalation check
+    /// finds it already at 3 and changes nothing, so the mission grinds at a rung with no
+    /// instruction it can act on.
+    /// </remarks>
+    public void ForceTier(int tier)
+    {
+        Mission = Mission with
+        {
+            EscalationTier = Math.Clamp(tier, 0, EscalationLadder.MaxTier),
+            TierChangedAtAttempt = Ledger.Count,
+        };
+
+        Log("escalated", $"Tier {Mission.EscalationTier} — {EscalationLadder.NameOf(Mission.EscalationTier)}.");
+        Persist();
+    }
+
+    /// <summary>
+    /// Reassigns the mission to another CLI, carrying the ledger and a handoff note. Tier 3.
+    /// </summary>
+    /// <remarks>
+    /// The tier drops back to 1 on the way through, and that is not a reset of progress — the
+    /// ledger still forbids every spent attempt, so nothing can be redone. It is because the tier
+    /// instruction at 3 is "hand this off", and an agent that has just arrived being told to hand
+    /// off would relay again immediately. It needs a rung it can actually work on, and the ladder
+    /// climbs again from there if it gets stuck too.
+    /// </remarks>
+    public void RelayTo(string agentId, string? handoffNote = null)
     {
         var from = Mission.AgentId;
-        Mission = Mission with { AgentId = agentId };
-        Log("relay", $"Mission relayed from {from} to {agentId} with {Ledger.Count} attempt(s) of history.");
+
+        Mission = Mission with
+        {
+            AgentId = agentId,
+            RelayHistory = [.. Mission.RelayHistory, from],
+            HandoffNote = string.IsNullOrWhiteSpace(handoffNote) ? Mission.HandoffNote : handoffNote,
+            EscalationTier = 1,
+            TierChangedAtAttempt = Ledger.Count,
+        };
+
+        Log("relay",
+            $"Mission relayed from {from} to {agentId} with {Ledger.Count} attempt(s) of history" +
+            (string.IsNullOrWhiteSpace(handoffNote) ? " and no handoff note." : " and a handoff note."));
+
         Persist();
     }
 

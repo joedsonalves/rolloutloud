@@ -91,6 +91,30 @@ public static class BriefingComposer
             sb.AppendLine();
         }
 
+        if (mission.RelayHistory.Count > 0)
+        {
+            sb.AppendLine("## You were handed this");
+            sb.AppendLine();
+            sb.AppendLine(
+                "This mission has already been worked by: " + string.Join(", ", mission.RelayHistory) +
+                ". It came to you because those runs stopped producing new information, not because " +
+                "the objective changed. The ledger below is theirs, and it still binds — you cannot " +
+                "repeat what they tried.");
+            sb.AppendLine();
+
+            if (!string.IsNullOrWhiteSpace(mission.HandoffNote))
+            {
+                sb.AppendLine("What the previous agent wanted you to know:");
+                sb.AppendLine();
+                sb.AppendLine("> " + mission.HandoffNote!.ReplaceLineEndings(Environment.NewLine + "> "));
+                sb.AppendLine();
+                sb.AppendLine(
+                    "Treat that as one agent's opinion, not as fact. It is there because it names " +
+                    "assumptions worth re-testing — including the ones it says it stopped trusting.");
+                sb.AppendLine();
+            }
+        }
+
         sb.AppendLine("## Ledger");
         sb.AppendLine();
         sb.AppendLine(ledger.Summarize());
