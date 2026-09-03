@@ -365,6 +365,33 @@ while it can still do something about it, instead of collecting a timeout that r
 `throttled: true` in the response means retry shortly; a plain 409 means the request itself will
 never work. They are different problems and the agent should not have to guess which it hit.
 
+## Knowing when a run has stopped paying
+
+The escalation ladder asks whether attempts are *different*. That misses the expensive way to be
+stuck: every attempt technically distinct, and each finding costing several times what it did.
+
+So there is a second trigger, measuring **cost per finding** — and the two catch different failures.
+Novelty catches the run that has collapsed onto one idea. This catches the one that is still
+learning, just not enough to be worth what it is spending.
+
+**A finding is an attempt that ruled something out** — one that recorded an observation, or reached
+the objective. The ledger's value is the list of theories it has killed, so an attempt that added
+to that list bought something and one that did not, did not.
+
+**The cost of an attempt is the context window at the time, not what the attempt added.** That is
+the counter-intuitive half: a cached session re-reads its whole window every turn, so what a turn
+costs is proportional to how big the window already was. Measuring the delta would say a long,
+expensive turn was free.
+
+**The comparison is against the run's own earlier half, never a constant.** Missions differ by
+orders of magnitude in what a finding is worth, and any number I picked would stop good runs on one
+kind of work and never fire on another. A run that has doubled the price of its own findings is
+saying something about itself that no threshold of mine could.
+
+It declines to have an opinion below six settled attempts, and falls back to wall clock where no
+token reading exists — an unmeasurable run is not a free one. The verdict names both prices rather
+than just the trend, because "degrading" alone tells you nothing you can check.
+
 ## Knowing when the window got expensive
 
 The offload threshold used to be a number with nothing to compare it against. `ShouldOffload` was

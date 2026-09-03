@@ -267,8 +267,10 @@
           </WrapPanel>
 
           <TextBlock Text="{Binding MissionSummary}" Classes="hint" Margin="0,0,0,2" />
-          <TextBlock Text="{Binding RelayHistory}" Classes="hint" Margin="0,0,0,10"
+          <TextBlock Text="{Binding RelayHistory}" Classes="hint" Margin="0,0,0,2"
                      IsVisible="{Binding RelayHistory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          <TextBlock Text="{Binding ProgressSummary}" Classes="hint" Margin="0,0,0,10" TextWrapping="Wrap"
+                     IsVisible="{Binding ProgressSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
           <TextBlock Text="{loc:Tr Key=ledger.title}" Classes="section" />
           <TextBlock Text="{loc:Tr Key=ledger.hint}" Classes="hint" Margin="0,0,0,6" />

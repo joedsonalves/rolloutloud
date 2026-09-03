@@ -531,6 +531,7 @@ public sealed class BridgeServer : IAsyncDisposable
     private async Task ContinueAsync(HttpListenerContext context, MissionEngine engine)
     {
         var decision = engine.ShouldContinue();
+        var progress = ProgressMeter.Assess(engine.Ledger.Attempts);
 
         await WriteAsync(context, HttpStatusCode.OK, new ContinueResponse
         {
@@ -539,6 +540,8 @@ public sealed class BridgeServer : IAsyncDisposable
             State = engine.Mission.State.ToString(),
             Tier = engine.Mission.EscalationTier,
             Attempts = engine.Ledger.Count,
+            ProgressTrend = progress.Trend.ToString().ToLowerInvariant(),
+            ProgressVerdict = progress.Verdict,
         }).ConfigureAwait(false);
     }
 

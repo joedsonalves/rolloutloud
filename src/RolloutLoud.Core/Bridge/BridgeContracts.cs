@@ -127,6 +127,17 @@ public sealed record ContinueResponse
     public required int Tier { get; init; }
 
     public required int Attempts { get; init; }
+
+    /// <summary>improving | steady | degrading | stalled | unknown</summary>
+    /// <remarks>
+    /// Carried on the answer to "may I stop" rather than given its own endpoint, because this is
+    /// the moment the agent is already deciding what to do next — and "keep going, but what you
+    /// are learning is costing several times what it did" is the same answer with the useful half
+    /// attached.
+    /// </remarks>
+    public string? ProgressTrend { get; init; }
+
+    public string? ProgressVerdict { get; init; }
 }
 
 public sealed record GateResponse
