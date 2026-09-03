@@ -74,6 +74,19 @@ public sealed record Attempt
 
     public TimeSpan Duration { get; init; }
 
+    /// <summary>
+    /// Size of the agent's context window when this was recorded.
+    /// </summary>
+    /// <remarks>
+    /// The cost proxy for <see cref="ProgressMeter"/>, and the window rather than the delta on
+    /// purpose: a cached session re-reads its whole context every turn, so what a turn costs is
+    /// proportional to how big the window already was — not to how much this attempt added.
+    ///
+    /// Null when nothing could be read. The meter falls back to wall clock rather than treating
+    /// an unknown as a zero, which would make an unmeasurable run look free.
+    /// </remarks>
+    public int? ContextTokens { get; init; }
+
     /// <summary>Stable fingerprint of the idea, used to reject repeats. See <see cref="Fingerprint"/>.</summary>
     public string Signature => Fingerprint(Command);
 

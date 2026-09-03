@@ -343,6 +343,12 @@ public sealed class MainViewModel : Observable
         }
     }
 
+    /// <summary>Whether the run is still buying findings, and at what price.</summary>
+    public string ProgressSummary =>
+        _mission is null
+            ? string.Empty
+            : ProgressMeter.Assess(_mission.Ledger.Attempts).Verdict;
+
     // ---- housekeeping -----------------------------------------------------------------------
 
     /// <summary>
@@ -952,6 +958,7 @@ public sealed class MainViewModel : Observable
         Raise(nameof(MissionSummary));
         Raise(nameof(RelayHistory));
         Raise(nameof(ContextReadingSummary));
+        Raise(nameof(ProgressSummary));
         Raise(nameof(PauseLabel));
         PauseMission.RaiseCanExecuteChanged();
         AbortMission.RaiseCanExecuteChanged();

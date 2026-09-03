@@ -42,7 +42,10 @@ public sealed class RolloutHost
         foreach (var record in Store.LoadAll())
         {
             var ledger = new MissionLedger(record.Mission.Id, record.Attempts);
-            var engine = new MissionEngine(record.Mission, ledger, Store, paths);
+            var engine = new MissionEngine(record.Mission, ledger, Store, paths)
+            {
+                ReadContextTokens = TokensFor,
+            };
 
             engine.EventLogged += e => MissionEventLogged?.Invoke(e);
             _engines[record.Mission.Id] = engine;
@@ -64,6 +67,13 @@ public sealed class RolloutHost
     /// <summary>Whether concrete actions should be going to subagents right now.</summary>
     public OffloadDecision OffloadNow(Mission mission) =>
         Context.ShouldOffload(mission, Paths.RepositoryRoot);
+
+    /// <summary>The window size for an agent, or null when nothing can read it.</summary>
+    private int? TokensFor(string agentId)
+    {
+        var reading = Context.Read(agentId, Paths.RepositoryRoot);
+        return reading.HasNumber ? reading.Tokens : null;
+    }
 
     /// <summary>What the last tidy found and removed. Shown in the window.</summary>
     public HousekeepingReport? LastHousekeeping { get; private set; }
@@ -343,6 +353,7 @@ public sealed class RolloutHost
         lock (_gate)
         {
             engine = MissionEngine.Create(mission, Store, Paths);
+            engine.ReadContextTokens = TokensFor;
             _engines[mission.Id] = engine;
             ActiveMissionId = mission.Id;
         }

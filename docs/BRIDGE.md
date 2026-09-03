@@ -176,6 +176,24 @@ Nothing is ever rejected for tripping the flag. Record what you actually saw.
 Almost always no. `continue: false` comes from a stop condition or the operator, never from an
 attempt having failed.
 
+The answer also carries how the run is doing:
+
+```json
+{ "continue": true, "tier": 1, "attempts": 6,
+  "progressTrend": "stalled",
+  "progressVerdict": "The last 3 attempt(s) produced nothing that ruled anything out, at a cost of
+                      2,842,746 tokens. That is not a hard problem being worked, it is the same
+                      ground being covered." }
+```
+
+`degrading` means you are still learning but each finding costs several times what it did.
+`stalled` means the recent stretch bought nothing at whatever it cost. Both mean **change the kind
+of approach, not its parameters** — and both will have moved the tier already, so read the tier
+instruction too.
+
+`unknown` means too few settled attempts to say anything honest. It is not a hint that things are
+fine.
+
 ### `POST /v1/missions/active/gate` — ask the gate
 
 The only thing that can end a mission as achieved. Runs the gate, and — when it passes — runs it

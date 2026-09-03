@@ -44,6 +44,16 @@ public sealed class MissionEngine
         _paths = paths;
     }
 
+    /// <summary>
+    /// Supplies the context window size when an attempt is recorded, if anything can read it.
+    /// </summary>
+    /// <remarks>
+    /// A callback rather than a dependency because Core must not know about the context meter's
+    /// probes — those read another program's files, and the mission engine has to stay runnable in
+    /// a test with nothing installed.
+    /// </remarks>
+    public Func<string, int?>? ReadContextTokens { get; set; }
+
     public Mission Mission { get; private set; }
 
     public MissionLedger Ledger { get; }
@@ -221,6 +231,13 @@ public sealed class MissionEngine
 
     private Attempt RecordCore(Attempt attempt)
     {
+        // Stamped here rather than by the caller so every path — bridge, subagent, watchdog —
+        // carries it without each of them having to remember.
+        if (attempt.ContextTokens is null && ReadContextTokens is not null)
+        {
+            attempt = attempt with { ContextTokens = ReadContextTokens(attempt.AgentId) };
+        }
+
         Ledger.Record(attempt);
         Log("attempt", $"[{attempt.Outcome}] {attempt.Hypothesis}");
 
@@ -240,14 +257,27 @@ public sealed class MissionEngine
         var sinceTierChange = Ledger.Count - Mission.TierChangedAtAttempt;
 
         if (sinceTierChange >= Mission.Stop.PlateauBeforeEscalation &&
-            EscalationLadder.ShouldEscalate(Ledger.Attempts, Mission.Stop.PlateauBeforeEscalation) &&
             Mission.EscalationTier < Mission.Stop.MaxEscalationTier)
         {
-            var tier = Mission.EscalationTier + 1;
-            Mission = Mission with { EscalationTier = tier, TierChangedAtAttempt = Ledger.Count };
-            Log("escalated",
-                $"No new information in the last {Mission.Stop.PlateauBeforeEscalation} attempt(s). " +
-                $"Tier {tier} — {EscalationLadder.NameOf(tier)}.");
+            // Two independent reasons to climb, because they catch different failures.
+            //
+            // Novelty catches the run that has collapsed onto one idea. Cost per finding catches
+            // the one where every attempt is technically distinct and nothing is being learned —
+            // which passes a novelty check and is exactly the expensive way to be stuck.
+            var stale = EscalationLadder.ShouldEscalate(Ledger.Attempts, Mission.Stop.PlateauBeforeEscalation);
+            var progress = ProgressMeter.Assess(Ledger.Attempts);
+
+            if (stale || progress.ShouldEscalate)
+            {
+                var tier = Mission.EscalationTier + 1;
+                Mission = Mission with { EscalationTier = tier, TierChangedAtAttempt = Ledger.Count };
+
+                Log("escalated",
+                    (stale
+                        ? $"No new information in the last {Mission.Stop.PlateauBeforeEscalation} attempt(s). "
+                        : progress.Verdict + " ") +
+                    $"Tier {tier} — {EscalationLadder.NameOf(tier)}.");
+            }
         }
 
         Persist();
