@@ -30,6 +30,14 @@ internal static class Program
         // language once, at load, so this has to happen first or the whole UI comes up English.
         Localizer.Initialize();
 
+        // Before Avalonia: by the time a second window exists the damage is done — its bridge has
+        // taken a new port and rewritten bridge.json, and every agent the first instance launched
+        // is holding a token for a port nobody is listening on.
+        if (SingleInstance.HandOverIfRunning(Paths))
+        {
+            return 0;
+        }
+
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 

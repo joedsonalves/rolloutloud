@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Text.Json;
+using RolloutLoud.Core.Bridge;
 using RolloutLoud.Core.Workspace;
 
 namespace RolloutLoud.Cli;
@@ -25,6 +27,8 @@ internal static class Program
         {
             "install" => await InstallAsync(paths, rest).ConfigureAwait(false),
             "open" => Open(paths, rest),
+            "attach" => await AttachAsync(paths, rest).ConfigureAwait(false),
+            "finish" => await FinishAsync(paths, rest).ConfigureAwait(false),
             "status" => await StatusAsync(paths).ConfigureAwait(false),
             "mission" => await MissionAsync(paths, rest).ConfigureAwait(false),
             "briefing" => await BriefingAsync(paths, rest).ConfigureAwait(false),
@@ -89,6 +93,115 @@ internal static class Program
 
         Console.WriteLine("Built. Opening the window…");
         return args.Contains("--no-open") ? 0 : Open(paths, []);
+    }
+
+    /// <summary>
+    /// The one command an agent runs to get working: find RolloutLoud, or start it, either way
+    /// print the bridge details.
+    /// </summary>
+    /// <remarks>
+    /// This exists because "is it installed, is it running, do I need to start it, has it finished
+    /// starting" is four questions, and an agent asking them in a shell gets three of them wrong.
+    /// One idempotent command answers all four and always ends with the same JSON on stdout.
+    ///
+    /// Safe to run repeatedly: the app hands the repository over to whichever instance already
+    /// owns it, so a second call focuses that window rather than starting a rival that would
+    /// overwrite the handshake and strand every agent holding the old token.
+    /// </remarks>
+    private static async Task<int> AttachAsync(RolloutPaths paths, string[] args)
+    {
+        var existing = RunningInstance.Detect(paths);
+        if (existing is not null)
+        {
+            Console.WriteLine(Describe(existing.Handshake, started: false));
+            return await MaybeOpenMissionAsync(paths, args).ConfigureAwait(false);
+        }
+
+        if (args.Contains("--no-start"))
+        {
+            Console.Error.WriteLine($"No RolloutLoud running for {paths.RepositoryRoot}.");
+            return 1;
+        }
+
+        var opened = Open(paths, args.Where(a => a != "--mission").ToArray());
+        if (opened != 0)
+        {
+            return opened;
+        }
+
+        // Poll for the handshake rather than sleeping a fixed amount: a cold start behind an
+        // antivirus scan can take several seconds, and a fixed wait is either too short to work
+        // or too long every other time.
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(45);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(400).ConfigureAwait(false);
+
+            var found = RunningInstance.Detect(paths, TimeSpan.FromSeconds(1));
+            if (found is not null)
+            {
+                Console.WriteLine(Describe(found.Handshake, started: true));
+                return await MaybeOpenMissionAsync(paths, args).ConfigureAwait(false);
+            }
+        }
+
+        Console.Error.WriteLine(
+            "RolloutLoud was started but did not publish .rolloutloud/bridge.json within 45s. " +
+            "Check that the window actually opened.");
+        return 1;
+    }
+
+    private static Task<int> MaybeOpenMissionAsync(RolloutPaths paths, string[] args)
+    {
+        var objective = Option(args, "--mission");
+        return string.IsNullOrWhiteSpace(objective)
+            ? Task.FromResult(0)
+            : MissionAsync(paths, [objective, .. args]);
+    }
+
+    private static string Describe(BridgeHandshake handshake, bool started) =>
+        JsonSerializer.Serialize(
+            new
+            {
+                started,
+                endpoint = handshake.Endpoint,
+                token = handshake.Token,
+                repositoryRoot = handshake.RepositoryRoot,
+                elevated = handshake.Elevated,
+                activeMissionId = handshake.ActiveMissionId,
+            },
+            new JsonSerializerOptions { WriteIndented = true });
+
+    /// <summary>
+    /// Asks to close RolloutLoud because the objective is met.
+    /// </summary>
+    /// <remarks>
+    /// Refused unless the mission is Achieved — which only a twice-passed gate produces. Running
+    /// out of ideas arrives here as Exhausted and is turned down with that named back.
+    /// </remarks>
+    private static async Task<int> FinishAsync(RolloutPaths paths, string[] args)
+    {
+        var client = BridgeClient.Discover(paths);
+        if (client is null)
+        {
+            Console.Error.WriteLine($"No RolloutLoud running for {paths.RepositoryRoot}.");
+            return 1;
+        }
+
+        using (client)
+        {
+            var body = await client.PostAsync("/v1/shutdown", new
+            {
+                missionId = Option(args, "--mission-id"),
+                agent = Option(args, "--agent"),
+                reason = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal)),
+            }).ConfigureAwait(false);
+
+            Console.WriteLine(body);
+
+            // Non-zero on a refusal so a script can branch on it without parsing the JSON.
+            return body.Contains("\"verdict\": \"refused\"", StringComparison.Ordinal) ? 2 : 0;
+        }
     }
 
     private static int Open(RolloutPaths paths, string[] args)
@@ -357,6 +470,9 @@ internal static class Program
 
             Setup
               rollout install [--no-open]      Build RolloutLoud and open it on this repository.
+              rollout attach [--mission "<objective>"] [--no-start] [--elevated]
+                                             Find it, or start it, and print the bridge details.
+                                             Idempotent — safe to run every session.
               rollout open [--elevated]        Open the window anchored here.
               rollout status                   Health of the running instance, and its missions.
 
@@ -371,6 +487,11 @@ internal static class Program
               rollout attempt "<hypothesis>" "<command>" [--outcome ...] [--learned "..."]
               rollout continue                 Whether you may stop. Almost always: no.
               rollout gate                     Ask the success gate. The only way a mission ends.
+
+            Finishing
+              rollout finish "<what was achieved>" [--agent <id>]
+                                             Ask to close RolloutLoud. Refused unless the mission
+                                             is Achieved — running out of ideas is not finishing.
 
             Fluid buttons
               rollout button --title "<label>" --command "<cmd>" [--why "..."] [--elevated] [--detached]
