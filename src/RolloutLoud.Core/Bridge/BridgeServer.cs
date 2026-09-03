@@ -278,7 +278,7 @@ public sealed class BridgeServer : IAsyncDisposable
                     return;
 
                 case ("attempts", "GET"):
-                    await WriteAsync(context, HttpStatusCode.OK, engine.Ledger.Attempts).ConfigureAwait(false);
+                    await QueryLedgerAsync(context, engine).ConfigureAwait(false);
                     return;
 
                 case ("gate", "POST"):
@@ -838,6 +838,38 @@ public sealed class BridgeServer : IAsyncDisposable
             Briefing = BriefingComposer.ForMainSession(
                 engine.Mission, engine.Ledger, _host.HasAttachedIdentity),
         }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Answers a question about what has been tried, without handing over the whole ledger.
+    /// </summary>
+    /// <remarks>
+    /// This route used to return every attempt in full. The briefing caps its summary at forty
+    /// entries precisely so a long run cannot flood a context — and then the only way to ask about
+    /// an older one was a call that imported all of them, which undoes offload in a single request.
+    ///
+    /// Filters are cheap, the page is small, the ceiling is hard, and the answer says how many
+    /// matched so the caller narrows rather than pages blindly through something it pays to read.
+    /// </remarks>
+    private async Task QueryLedgerAsync(HttpListenerContext context, MissionEngine engine)
+    {
+        var q = context.Request.QueryString;
+
+        var query = new LedgerQuery
+        {
+            Outcome = q["outcome"],
+            Agent = q["agent"],
+            Tier = int.TryParse(q["tier"], out var tier) ? tier : null,
+            Contains = q["contains"],
+            Since = DateTimeOffset.TryParse(q["since"], out var since) ? since : null,
+            Limit = int.TryParse(q["limit"], out var limit) ? limit : LedgerQueryResult.DefaultLimit,
+            Offset = int.TryParse(q["offset"], out var offset) ? offset : 0,
+            Full = string.Equals(q["full"], "true", StringComparison.OrdinalIgnoreCase),
+        };
+
+        var result = LedgerQueryRunner.Run(engine.Ledger.Attempts, query);
+
+        await WriteAsync(context, HttpStatusCode.OK, result).ConfigureAwait(false);
     }
 
     private async Task CreateButtonAsync(HttpListenerContext context)

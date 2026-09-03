@@ -225,6 +225,7 @@ rollout mission "<objective>" --gate "<command>" --scope a,b --auth "<who author
 rollout briefing ["<subagent task>"]
 rollout admit    "<hypothesis>" "<command>"
 rollout attempt  "<hypothesis>" "<command>" --outcome failed --learned "…"
+rollout ledger ["<text>"] [--outcome …] [--agent …] [--tier N] [--since …] [--limit N] [--full]
 rollout continue
 rollout gate
 
