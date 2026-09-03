@@ -189,7 +189,10 @@ public sealed class MissionLedger
         var shown = _attempts.TakeLast(maxEntries).ToList();
         if (shown.Count < _attempts.Count)
         {
-            lines.Add($"[{_attempts.Count - shown.Count} earlier attempt(s) omitted; ask the bridge for the full ledger if you need them.]");
+            lines.Add(
+                $"[{_attempts.Count - shown.Count} earlier attempt(s) omitted. Ask for a specific one " +
+                "rather than all of them: GET /v1/missions/active/attempts?contains=<text> — also " +
+                "filterable by outcome, agent, tier and since.]");
             lines.Add(string.Empty);
         }
 

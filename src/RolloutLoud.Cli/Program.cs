@@ -32,6 +32,7 @@ internal static class Program
             "identity" => Identity(paths, rest),
             "subagent" => await SubagentAsync(paths, rest).ConfigureAwait(false),
             "resume" => await ResumeAsync(paths, rest).ConfigureAwait(false),
+            "ledger" => await LedgerAsync(paths, rest).ConfigureAwait(false),
             "status" => await StatusAsync(paths).ConfigureAwait(false),
             "mission" => await MissionAsync(paths, rest).ConfigureAwait(false),
             "briefing" => await BriefingAsync(paths, rest).ConfigureAwait(false),
@@ -210,7 +211,7 @@ internal static class Program
             {
                 missionId = Option(args, "--mission-id"),
                 agent = Option(args, "--agent"),
-                reason = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal)),
+                reason = Positional(args, "--mission-id", "--agent"),
             }).ConfigureAwait(false);
 
             Console.WriteLine(body);
@@ -464,6 +465,44 @@ internal static class Program
         })).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Asks what has already been tried, filtered.
+    /// </summary>
+    /// <remarks>
+    /// There is deliberately no flag that fetches everything. The ceiling is enforced by the
+    /// bridge, and offering a --all here would be handing back the thing the cap exists to prevent.
+    /// </remarks>
+    private static async Task<int> LedgerAsync(RolloutPaths paths, string[] args)
+    {
+        var parts = new List<string>();
+
+        void Add(string name, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                parts.Add($"{name}={Uri.EscapeDataString(value)}");
+            }
+        }
+
+        Add("outcome", Option(args, "--outcome"));
+        Add("agent", Option(args, "--agent"));
+        Add("tier", Option(args, "--tier"));
+        Add("contains", Option(args, "--contains") ?? Positional(
+            args, "--outcome", "--agent", "--tier", "--contains", "--since", "--limit", "--offset"));
+        Add("since", Option(args, "--since"));
+        Add("limit", Option(args, "--limit"));
+        Add("offset", Option(args, "--offset"));
+
+        if (args.Contains("--full"))
+        {
+            parts.Add("full=true");
+        }
+
+        var route = "/v1/missions/active/attempts" + (parts.Count > 0 ? "?" + string.Join("&", parts) : string.Empty);
+
+        return await SimpleGetAsync(paths, route).ConfigureAwait(false);
+    }
+
     private static async Task<int> SubagentAsync(RolloutPaths paths, string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
@@ -551,6 +590,37 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// The first argument that is a word of its own, rather than a flag or a flag's value.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ The obvious version — first argument not starting with <c>--</c> — is wrong, and quietly:
+    /// <c>rollout ledger --limit 2</c> takes <c>2</c> as the text to search for, matches nothing,
+    /// and reports "no attempt like this has been made". A confident, wrong answer to the one
+    /// question this command exists to answer.
+    ///
+    /// The flags that take a value have to be named. Skipping the word after *any* flag would break
+    /// the other half — <c>rollout ledger --full timeout</c> would swallow the search term, since
+    /// <c>--full</c> is a bare switch.
+    /// </remarks>
+    private static string? Positional(string[] args, params string[] valueFlags)
+    {
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (!args[i].StartsWith("--", StringComparison.Ordinal))
+            {
+                return args[i];
+            }
+
+            if (valueFlags.Contains(args[i], StringComparer.OrdinalIgnoreCase))
+            {
+                i++;
+            }
+        }
+
+        return null;
+    }
+
     private static string? Option(string[] args, string name)
     {
         for (var i = 0; i < args.Length - 1; i++)
@@ -600,6 +670,10 @@ internal static class Program
               rollout resume [--mission-id <id>] [--agent <id>]
                                              Pick a mission back up after the window was closed.
                                              Starts RolloutLoud first if it is not running.
+              rollout ledger ["<text>"] [--outcome ...] [--agent ...] [--tier N]
+                                             [--since ...] [--limit N] [--full]
+                                             What has already been tried. Filtered and paged —
+                                             there is no way to fetch the lot, on purpose.
               rollout continue                 Whether you may stop. Almost always: no.
               rollout gate                     Ask the success gate. The only way a mission ends.
 

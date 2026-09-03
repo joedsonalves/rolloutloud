@@ -141,6 +141,17 @@ public static class BriefingComposer
         sb.AppendLine(UntrustedText.Fence(ledger.Summarize(), "ledger"));
         sb.AppendLine();
 
+        // Outside the fence: this is the tool speaking, not recorded output. Without it the cap on
+        // the summary above reads as "the rest is unavailable" rather than "ask for the part you
+        // need", and an agent that assumes the past is out of reach re-treads it.
+        sb.AppendLine(
+            "That summary is capped so a long run cannot flood your context. When you need " +
+            "something it left out, ask for **that** rather than for all of it: " +
+            "`GET /v1/missions/active/attempts?contains=<text>`, also filterable by `outcome`, " +
+            "`agent`, `tier` and `since`. No match is an answer — it means what you are about to " +
+            "try is not a repeat.");
+        sb.AppendLine();
+
         sb.AppendLine("## If you need an identity");
         sb.AppendLine();
         sb.AppendLine(identityAttached

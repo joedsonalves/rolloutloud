@@ -66,6 +66,8 @@ POST /v1/missions/active/admit       may I try this?  │
    ▼                                                  │
 POST /v1/missions/active/attempts    here is what happened
    │                                                  │
+   │  (GET the same route, filtered, to ask what      │
+   │   has already been tried — see below)            │
    ▼                                                  │
    mayStop:false ────────────────────────────────────►┘
    mayStop:true  ──►  stop and report
@@ -170,6 +172,44 @@ Nothing is ever rejected for tripping the flag. Record what you actually saw.
 ```json
 { "attemptId": "…", "totalAttempts": 12, "tier": 2, "mayStop": false, "directive": "Keep going. …" }
 ```
+
+### `GET /v1/missions/active/attempts` — what has already been tried?
+
+Your briefing carries a summary of the ledger, capped so a long run cannot flood your context. When
+you need something the summary left out, ask for **that**, not for the lot:
+
+```bash
+curl -G "$EP/v1/missions/active/attempts" -H "X-RolloutLoud-Token: $TK" \
+     --data-urlencode "contains=line endings"
+```
+
+| parameter  | narrows to                                                        |
+| ---------- | ----------------------------------------------------------------- |
+| `contains` | attempts whose hypothesis, command or `learned` mentions the text  |
+| `outcome`  | `succeeded` \| `failed` \| `blocked` \| `duplicate` \| `errored`     |
+| `agent`    | one agent — the question to ask after a relay                     |
+| `tier`     | one rung of the escalation ladder                                 |
+| `since`    | anything after a moment, as ISO-8601                              |
+| `limit`    | how many, default 20, **hard ceiling 50**                         |
+| `offset`   | page onwards; the answer says how many are left                   |
+| `full`     | `true` adds the command, exit code and artifact folder            |
+
+```json
+{ "entries": [ … ], "matched": 6, "total": 41, "offset": 0,
+  "guidance": "2 of 6 matching, newest first; 4 older one(s) not shown. Narrow with outcome,
+               agent, tier or contains rather than paging — reading the whole ledger costs you
+               the context that offload exists to protect." }
+```
+
+Newest first, because a question about the past is nearly always about the recent past.
+
+⚠️ **There is no way to fetch the whole ledger, deliberately.** Fifty is a ceiling, not a default,
+and no combination of parameters lifts it. A two-hundred-attempt ledger pasted into a context is
+exactly the cost subagent offload exists to avoid; one greedy call would undo the mode the operator
+switched on. Narrow the question instead — that is nearly always what you actually wanted.
+
+`matched: 0` is an **answer**, not an empty result: nothing like this has been tried, so what you
+are about to do is not a repeat.
 
 ### `GET /v1/missions/active/continue` — may I stop?
 
