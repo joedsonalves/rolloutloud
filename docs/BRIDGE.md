@@ -321,6 +321,24 @@ If a step needs a real secret, post a fluid button and let the operator run it.
 
 ---
 
+## Resuming
+
+### `POST /v1/resume`
+
+```bash
+curl -X POST "$EP/v1/resume" -H "X-RolloutLoud-Token: $TK" -d '{}'
+```
+
+Picks up the mission that was left running when the window last closed. Pass `missionId` to name
+one, or `agent` to hand it to a different CLI on the way back in.
+
+The response carries the **briefing**, so you need no second call — you asked to resume, and this
+is the thing you would have asked for next. It also says how many fluid buttons were still waiting.
+
+Refused with **409** when the mission is finished. Achieved, exhausted or aborted, it stays that
+way: restarting it would undo a decision somebody made, including the gate's. Open a new mission
+instead.
+
 ## Finishing
 
 ### `POST /v1/shutdown` — ask to close RolloutLoud

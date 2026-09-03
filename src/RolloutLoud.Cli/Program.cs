@@ -31,6 +31,7 @@ internal static class Program
             "finish" => await FinishAsync(paths, rest).ConfigureAwait(false),
             "identity" => Identity(paths, rest),
             "subagent" => await SubagentAsync(paths, rest).ConfigureAwait(false),
+            "resume" => await ResumeAsync(paths, rest).ConfigureAwait(false),
             "status" => await StatusAsync(paths).ConfigureAwait(false),
             "mission" => await MissionAsync(paths, rest).ConfigureAwait(false),
             "briefing" => await BriefingAsync(paths, rest).ConfigureAwait(false),
@@ -112,10 +113,19 @@ internal static class Program
     /// </remarks>
     private static async Task<int> AttachAsync(RolloutPaths paths, string[] args)
     {
+        // --quiet suppresses the handshake JSON, for callers that only wanted the side effect of
+        // RolloutLoud being up. Without it, `rollout resume` printed two JSON documents and the
+        // caller had to work out which one answered its question.
+        var quiet = args.Contains("--quiet");
+
         var existing = RunningInstance.Detect(paths);
         if (existing is not null)
         {
-            Console.WriteLine(Describe(existing.Handshake, started: false));
+            if (!quiet)
+            {
+                Console.WriteLine(Describe(existing.Handshake, started: false));
+            }
+
             return await MaybeOpenMissionAsync(paths, args).ConfigureAwait(false);
         }
 
@@ -125,7 +135,7 @@ internal static class Program
             return 1;
         }
 
-        var opened = Open(paths, args.Where(a => a != "--mission").ToArray());
+        var opened = Open(paths, args.Where(a => a != "--mission").ToArray(), quiet);
         if (opened != 0)
         {
             return opened;
@@ -142,7 +152,11 @@ internal static class Program
             var found = RunningInstance.Detect(paths, TimeSpan.FromSeconds(1));
             if (found is not null)
             {
-                Console.WriteLine(Describe(found.Handshake, started: true));
+                if (!quiet)
+                {
+                    Console.WriteLine(Describe(found.Handshake, started: true));
+                }
+
                 return await MaybeOpenMissionAsync(paths, args).ConfigureAwait(false);
             }
         }
@@ -248,7 +262,7 @@ internal static class Program
         return 0;
     }
 
-    private static int Open(RolloutPaths paths, string[] args)
+    private static int Open(RolloutPaths paths, string[] args, bool quiet = false)
     {
         var executable = FindApp(paths);
         if (executable is null)
@@ -277,7 +291,12 @@ internal static class Program
         try
         {
             Process.Start(info);
-            Console.WriteLine($"Opened RolloutLoud on {paths.RepositoryRoot}");
+
+            if (!quiet)
+            {
+                Console.WriteLine($"Opened RolloutLoud on {paths.RepositoryRoot}");
+            }
+
             return 0;
         }
         catch (System.ComponentModel.Win32Exception ex)
@@ -419,6 +438,32 @@ internal static class Program
     /// <summary>
     /// Hands one step to a fresh process and prints the verdict, not the transcript.
     /// </summary>
+    /// <summary>
+    /// Picks a mission back up after the window was closed.
+    /// </summary>
+    /// <remarks>
+    /// Starts RolloutLoud first if it is not running, because the common case is exactly that: the
+    /// operator closed everything, came back, and wants to carry on. Making them run two commands
+    /// in the right order would be the tool asking them to remember its internals.
+    /// </remarks>
+    private static async Task<int> ResumeAsync(RolloutPaths paths, string[] args)
+    {
+        if (RunningInstance.Detect(paths) is null)
+        {
+            var attached = await AttachAsync(paths, ["--quiet", .. args]).ConfigureAwait(false);
+            if (attached != 0)
+            {
+                return attached;
+            }
+        }
+
+        return await SendAsync(paths, client => client.PostAsync("/v1/resume", new
+        {
+            missionId = Option(args, "--mission-id"),
+            agent = Option(args, "--agent"),
+        })).ConfigureAwait(false);
+    }
+
     private static async Task<int> SubagentAsync(RolloutPaths paths, string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
@@ -533,7 +578,7 @@ internal static class Program
 
             Setup
               rollout install [--no-open]      Build RolloutLoud and open it on this repository.
-              rollout attach [--mission "<objective>"] [--no-start] [--elevated]
+              rollout attach [--mission "<objective>"] [--no-start] [--elevated] [--quiet]
                                              Find it, or start it, and print the bridge details.
                                              Idempotent — safe to run every session.
               rollout open [--elevated]        Open the window anchored here.
@@ -552,6 +597,9 @@ internal static class Program
                                              Run one step in a fresh process. Returns the verdict,
                                              not the transcript — the point is that the output
                                              never reaches your context.
+              rollout resume [--mission-id <id>] [--agent <id>]
+                                             Pick a mission back up after the window was closed.
+                                             Starts RolloutLoud first if it is not running.
               rollout continue                 Whether you may stop. Almost always: no.
               rollout gate                     Ask the success gate. The only way a mission ends.
 

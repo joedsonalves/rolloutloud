@@ -36,8 +36,14 @@ public sealed class RolloutHost
         Paths.EnsureCreated();
 
         Store = new MissionStore(paths);
+        Buttons_ = new ButtonStore(paths);
         Housekeeping = new Housekeeper(paths);
         Context = new ContextMeter();
+
+        foreach (var button in Buttons_.Load())
+        {
+            _buttons[button.Id] = button;
+        }
 
         foreach (var record in Store.LoadAll())
         {
@@ -50,6 +56,11 @@ public sealed class RolloutHost
             engine.EventLogged += e => MissionEventLogged?.Invoke(e);
             _engines[record.Mission.Id] = engine;
         }
+
+        Interrupted =
+        [
+            .. _engines.Values.Where(e => e.Mission.State == MissionState.Running),
+        ];
 
         // Tidy after loading, not before: the missions have to be known so the run folders that
         // still belong to an open one can be protected from the prune.
@@ -101,6 +112,20 @@ public sealed class RolloutHost
     public IElevationService Elevation { get; }
 
     public MissionStore Store { get; }
+
+    private ButtonStore Buttons_ { get; }
+
+    /// <summary>
+    /// Missions left Running when the process last died.
+    /// </summary>
+    /// <remarks>
+    /// Not a timestamp check. One RolloutLoud owns a repository, so if this one is starting, no
+    /// process is working any mission — every Running mission on disk was interrupted, by
+    /// definition. Their state is deliberately not rewritten: the mission genuinely is unfinished,
+    /// and marking it Paused or Aborted would be the tool inventing a decision the operator never
+    /// made. It is surfaced instead, so it can be resumed rather than quietly forgotten.
+    /// </remarks>
+    public IReadOnlyList<MissionEngine> Interrupted { get; private set; } = [];
 
     /// <summary>
     /// The configured CLIs, re-read whenever agents.json changes.
@@ -438,6 +463,7 @@ public sealed class RolloutHost
             _buttons[resolved.Id] = resolved;
         }
 
+        PersistButtons();
         StateChanged?.Invoke();
         return resolved;
     }
@@ -551,6 +577,7 @@ public sealed class RolloutHost
             _buttons[button.Id] = button;
         }
 
+        PersistButtons();
         StateChanged?.Invoke();
         return button;
     }
@@ -565,6 +592,7 @@ public sealed class RolloutHost
             }
         }
 
+        PersistButtons();
         StateChanged?.Invoke();
     }
 
@@ -608,6 +636,18 @@ public sealed class RolloutHost
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(file))!);
         File.WriteAllText(file, updated);
+    }
+
+    /// <summary>Writes the open buttons out. Called on every change to one.</summary>
+    private void PersistButtons()
+    {
+        List<FluidButton> snapshot;
+        lock (_gate)
+        {
+            snapshot = [.. _buttons.Values];
+        }
+
+        Buttons_.Save(snapshot);
     }
 
     private static string Excerpt(string value)

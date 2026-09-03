@@ -365,6 +365,29 @@ while it can still do something about it, instead of collecting a timeout that r
 `throttled: true` in the response means retry shortly; a plain 409 means the request itself will
 never work. They are different problems and the agent should not have to guess which it hit.
 
+## Closing the window mid-run
+
+```powershell
+rollout resume
+```
+
+The ledger has always survived a restart. What did not was any way to get back to it — closing the
+window four hours into a six-hour run meant starting over, not because the record was gone but
+because nothing put it back in front of an agent.
+
+`resume` starts RolloutLoud first if it is not running, finds the mission that was left going,
+brings it back at the tier it reached, and returns the briefing in the response so a resumed agent
+needs no second call.
+
+**Fluid buttons survive too**, and that gap was the sharper one. A button lived only in memory, so
+an agent that posted one because it could not run something itself would keep waiting after a
+restart for a thing that no longer existed anywhere. Open buttons are written to disk now; finished
+ones are not, because history belongs in the run folders. One that was mid-execution comes back as
+pending, since nothing is running it any more.
+
+**A finished mission is not resumable.** Achieved, exhausted or aborted, it is refused — quietly
+restarting one would undo a decision somebody made, including the gate's.
+
 ## Knowing when a run has stopped paying
 
 The escalation ladder asks whether attempts are *different*. That misses the expensive way to be
