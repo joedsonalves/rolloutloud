@@ -25,6 +25,8 @@ public sealed class RolloutHost
     private readonly Dictionary<string, FluidButton> _buttons = new(StringComparer.Ordinal);
     private ButtonAllowlist _allowlist = ButtonAllowlist.Empty;
     private DateTime _allowlistStamp = DateTime.MinValue;
+    private IReadOnlyList<AgentDescriptor> _agents = AgentCatalog.Defaults;
+    private DateTime _agentsStamp = DateTime.MinValue;
 
     public RolloutHost(RolloutPaths paths, IElevationService elevation)
     {
@@ -33,7 +35,6 @@ public sealed class RolloutHost
         Paths.EnsureCreated();
 
         Store = new MissionStore(paths);
-        Agents = AgentCatalog.Load(paths.AgentsFile);
 
         foreach (var record in Store.LoadAll())
         {
@@ -48,7 +49,41 @@ public sealed class RolloutHost
 
     public MissionStore Store { get; }
 
-    public IReadOnlyList<AgentDescriptor> Agents { get; private set; }
+    /// <summary>
+    /// The configured CLIs, re-read whenever agents.json changes.
+    /// </summary>
+    /// <remarks>
+    /// Live for the same reason the allowlist is: the operator edits this file precisely in the
+    /// middle of a session — a bypass flag stopped working, or a new CLI needs registering — and
+    /// making the edit take effect only after a restart means it silently does nothing at the one
+    /// moment it was wanted.
+    ///
+    /// It was startup-only until a test registered a new agent mid-run and got "unknown agent"
+    /// back, which reads as a bug in the request rather than in the timing.
+    /// </remarks>
+    public IReadOnlyList<AgentDescriptor> Agents
+    {
+        get
+        {
+            var stamp = File.Exists(Paths.AgentsFile)
+                ? File.GetLastWriteTimeUtc(Paths.AgentsFile)
+                : DateTime.MinValue;
+
+            lock (_gate)
+            {
+                if (stamp != _agentsStamp)
+                {
+                    _agents = AgentCatalog.Load(Paths.AgentsFile);
+                    _agentsStamp = stamp;
+
+                    // A newly registered CLI may well have just been installed too.
+                    AgentAvailability.Forget();
+                }
+
+                return _agents;
+            }
+        }
+    }
 
     /// <summary>
     /// The current allowlist, re-read whenever the file on disk has changed.
@@ -284,11 +319,8 @@ public sealed class RolloutHost
         StateChanged?.Invoke();
     }
 
-    public void ReloadConfiguration()
-    {
-        Agents = AgentCatalog.Load(Paths.AgentsFile);
-        StateChanged?.Invoke();
-    }
+    /// <summary>Nudges the UI after the starter files are written. Both tables re-read themselves.</summary>
+    public void ReloadConfiguration() => StateChanged?.Invoke();
 
     /// <summary>
     /// Writes the mission briefing into the agent's instruction file and opens its terminal.
