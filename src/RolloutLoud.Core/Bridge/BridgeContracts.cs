@@ -194,6 +194,30 @@ public sealed record BriefingResponse
     public required bool OffloadActive { get; init; }
 }
 
+/// <summary>An agent asking to close RolloutLoud because it believes the objective is met.</summary>
+public sealed record ShutdownRequest
+{
+    public string? MissionId { get; init; }
+
+    public string? Agent { get; init; }
+
+    /// <summary>What was achieved, in the agent's words. Shown to the operator, never trusted.</summary>
+    public string? Reason { get; init; }
+}
+
+public sealed record ShutdownResponse
+{
+    /// <summary>allowed | allowedUnattended | refused</summary>
+    public required string Verdict { get; init; }
+
+    public required bool Closing { get; init; }
+
+    public required string Reason { get; init; }
+
+    /// <summary>State the decision was made on. The agent's own opinion is not an input.</summary>
+    public string? MissionState { get; init; }
+}
+
 public sealed record ErrorResponse
 {
     public required string Error { get; init; }

@@ -22,7 +22,7 @@ namespace RolloutLoud.Core.Bridge;
 ///
 /// 1. **It binds 127.0.0.1 only, and still requires a token.** The loopback bind keeps it off the
 ///    network; the token keeps it away from every other process on the machine, which on a
-///    pentest box is not a hypothetical population. The token is compared in constant time — not
+///    developer box is not a small population. The token is compared in constant time — not
 ///    because a timing attack on localhost is likely, but because writing the sloppy comparison
 ///    once is how it ends up copied somewhere it matters.
 ///
@@ -175,6 +175,12 @@ public sealed class BridgeServer : IAsyncDisposable
 
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var method = request.HttpMethod;
+
+        if (segments is ["v1", "shutdown"] && method == "POST")
+        {
+            await ShutdownAsync(context).ConfigureAwait(false);
+            return;
+        }
 
         // /v1/buttons ...
         if (segments is ["v1", "buttons"])
@@ -347,7 +353,7 @@ public sealed class BridgeServer : IAsyncDisposable
 
         var mission = new Mission
         {
-            Id = "m-" + DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss"),
+            Id = Mission.NewId(),
             Objective = body.Objective.Trim(),
             AgentId = agentId,
             Gate = gate,
@@ -542,6 +548,48 @@ public sealed class BridgeServer : IAsyncDisposable
 
         engine.RelayTo(agentId);
         await WriteAsync(context, HttpStatusCode.OK, engine.Mission).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The only endpoint that can end RolloutLoud, and the one most worth refusing.
+    /// </summary>
+    /// <remarks>
+    /// An agent asking to shut the tool down is asking to end its own supervision, and an agent
+    /// that has been grinding for hours has every incentive to believe it is finished. So nothing
+    /// in the request body is an input to the decision: the verdict comes from MissionState, which
+    /// only a twice-passed gate can set to Achieved.
+    ///
+    /// 409 rather than 403 on a refusal — the agent is not forbidden, the state is simply not what
+    /// it thinks. The reason names the actual state so it can tell "not done" from "not allowed".
+    /// </remarks>
+    private async Task ShutdownAsync(HttpListenerContext context)
+    {
+        var body = await ReadAsync<ShutdownRequest>(context).ConfigureAwait(false);
+        var engine = _host.FindMission(body?.MissionId);
+
+        var decision = _host.RequestShutdown(body?.MissionId, body?.Agent, body?.Reason);
+
+        Logged?.Invoke(decision.Allowed
+            ? $"Shutdown allowed: {decision.Reason}"
+            : $"Shutdown refused: {decision.Reason}");
+
+        var payload = new ShutdownResponse
+        {
+            Verdict = decision.Verdict switch
+            {
+                ShutdownVerdict.AllowedUnattended => "allowedUnattended",
+                ShutdownVerdict.Allowed => "allowed",
+                _ => "refused",
+            },
+            Closing = decision.Verdict == ShutdownVerdict.AllowedUnattended,
+            Reason = decision.Reason,
+            MissionState = engine?.Mission.State.ToString(),
+        };
+
+        await WriteAsync(
+            context,
+            decision.Allowed ? HttpStatusCode.OK : HttpStatusCode.Conflict,
+            payload).ConfigureAwait(false);
     }
 
     private async Task CreateButtonAsync(HttpListenerContext context)

@@ -82,21 +82,18 @@ given one.
 
 ```bash
 curl -X POST "$EP/v1/missions" -H "X-RolloutLoud-Token: $TK" -d '{
-  "objective": "attack within scope until a critical is confirmed",
+  "objective": "make the integration suite pass on Windows, not just on my machine",
   "agent": "claude",
-  "gateCommand": "python verify_finding.py --severity critical",
-  "gateDescription": "a reproducible critical with a working PoC",
-  "scope": ["app.example.com", "10.0.4.0/24"],
-  "scopeExclusions": ["payments.example.com"],
-  "authorization": "engagement REF-2026-114, signed by the client CISO",
+  "gateCommand": "dotnet test tests/Integration -c Release",
+  "gateDescription": "green on Windows, twice in a row, with no skipped tests",
   "offload": "always",
   "maxAttempts": 200,
   "maxHours": 6
 }'
 ```
 
-Returns the mission, the composed briefing, and a `warning` when targets are declared with no
-authorisation recorded.
+`scope` is optional and most missions leave it out. Returns the mission, the composed briefing,
+and a `warning` when targets are declared with no approval recorded.
 
 ### `GET /v1/missions/active/briefing` — what you are doing
 
@@ -107,8 +104,8 @@ a structured verdict rather than prose. That is what you hand down when offload 
 
 ```bash
 curl -X POST "$EP/v1/missions/active/admit" -H "X-RolloutLoud-Token: $TK" -d '{
-  "hypothesis": "The login form concatenates the username into SQL",
-  "command": "sqlmap -u https://app.example.com/login --batch"
+  "hypothesis": "The suite fails on Windows because the fixture writes with LF line endings",
+  "command": "dotnet test tests/Integration --filter Category=Fixtures"
 }'
 ```
 
@@ -125,7 +122,7 @@ weaker than "this class of idea is dead".
 | `outcome` | What it means |
 |---|---|
 | `Duplicate` | You, or another agent, already tried this. Change the *kind* of approach, not its parameters. |
-| `BlockedByScope` | Outside the engagement. The reason names what *is* in scope. |
+| `BlockedByScope` | Outside the mission's declared boundary. The reason names what *is* in scope. |
 
 ⚠️ Admission **reserves** the idea immediately. If you declare something and never report on it,
 it stays reserved for 30 minutes, then expires. Do not declare speculatively.
@@ -137,10 +134,10 @@ deliberate — varying a port is not varying an approach.
 
 ```bash
 curl -X POST "$EP/v1/missions/active/attempts" -H "X-RolloutLoud-Token: $TK" -d '{
-  "hypothesis": "The login form concatenates the username into SQL",
-  "command": "sqlmap -u https://app.example.com/login --batch",
+  "hypothesis": "The suite fails on Windows because the fixture writes with LF line endings",
+  "command": "dotnet test tests/Integration --filter Category=Fixtures",
   "outcome": "failed",
-  "learned": "Parameterised on every endpoint sqlmap reached. Rules out classic SQLi at the edge.",
+  "learned": "Green with CRLF forced too. Rules out line endings as the cause anywhere in the fixtures.",
   "exitCode": 1,
   "output": "<full stdout — filed to a run folder, kept out of the ledger>"
 }'
@@ -182,6 +179,46 @@ curl -X POST "$EP/v1/missions/active/relay" -H "X-RolloutLoud-Token: $TK" -d '{"
 The ledger goes with it. Before handing off, write the paragraph you would want to read if you
 were picking this up cold: what you now believe about the target, and which of your assumptions
 you no longer trust.
+
+---
+
+## Finishing
+
+### `POST /v1/shutdown` — ask to close RolloutLoud
+
+```bash
+curl -X POST "$EP/v1/shutdown" -H "X-RolloutLoud-Token: $TK" -d '{
+  "missionId": "m-20260903-100134-52aa9f31",
+  "agent": "claude",
+  "reason": "suite is green on Windows, twice"
+}'
+```
+
+**Nothing in that body is an input to the decision.** The verdict comes from the mission's state,
+which only a twice-passed gate can set to `Achieved`. Your own view of whether you are finished is
+the one thing this endpoint refuses to consider — which is the point, because an agent that has
+been grinding for hours has every reason to believe it is done.
+
+`200` when allowed, `409` when not, with the actual state named:
+
+```json
+{ "verdict": "refused", "closing": false, "missionState": "Exhausted",
+  "reason": "Refused: the mission is Exhausted — a stop condition fired before the gate was
+             satisfied. Running out of budget is not completing the objective." }
+```
+
+Four refusals, each a different mistake:
+
+| Situation | Why it is refused |
+|---|---|
+| The mission is still `Running` | The gate has not been satisfied. Ask the gate, not this. |
+| The mission is `Exhausted` | You ran out of budget. That is not completing the objective. |
+| No machine-checkable gate | Only the operator can say an operator-judged mission is done. |
+| Another mission is open | Somebody else is working in this window. |
+
+When allowed, `closing` says what actually happens. `false` means a **Close RolloutLoud** button
+is now waiting for the operator; `true` means the operator switched on unattended shutdown and the
+window is going. Either way your work is done — do not poll for the window to disappear.
 
 ---
 

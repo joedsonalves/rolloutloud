@@ -88,6 +88,75 @@ public sealed class RolloutHost
 
     public event Action? StateChanged;
 
+    /// <summary>
+    /// Raised when a shutdown request has passed <see cref="ShutdownGate"/> and the operator has
+    /// allowed unattended closing. The App owns the actual exit — Core has no window to close.
+    /// </summary>
+    public event Action<string>? ShutdownApproved;
+
+    /// <summary>
+    /// Whether an agent may close the window without the operator clicking. Off by default: the
+    /// gate decides whether the WORK is done, and this decides whether the operator wants the
+    /// window gone as a result. Those are different questions and the second one is theirs.
+    /// </summary>
+    public bool AllowUnattendedShutdown { get; set; }
+
+    /// <summary>
+    /// An agent asking to close RolloutLoud because it believes the objective is met.
+    /// </summary>
+    /// <remarks>
+    /// Never evaluated on what the agent claims — only on <see cref="MissionState"/>, which only a
+    /// twice-passed gate can set to Achieved. "I could not do it" reaches this method as
+    /// Exhausted or Running, and is refused with that named back at it.
+    /// </remarks>
+    public ShutdownDecision RequestShutdown(string? missionId, string? requestedBy, string? reason)
+    {
+        var engine = FindMission(missionId);
+        var decision = ShutdownGate.Evaluate(
+            engine?.Mission,
+            [.. Missions.Select(m => m.Mission)],
+            AllowUnattendedShutdown);
+
+        if (!decision.Allowed)
+        {
+            return decision;
+        }
+
+        var who = requestedBy ?? engine?.Mission.AgentId ?? "an agent";
+
+        if (decision.Verdict == ShutdownVerdict.AllowedUnattended)
+        {
+            ShutdownApproved?.Invoke($"{who}: {reason ?? decision.Reason}");
+            return decision;
+        }
+
+        // A button rather than an exit. The work is done; whether the window goes is the
+        // operator's call, and it is one click.
+        CreateButton(new FluidButton
+        {
+            Id = "btn-shutdown-" + Guid.NewGuid().ToString("N")[..6],
+            Title = "Close RolloutLoud — objective met",
+            Command = ShutdownButtonCommand,
+            Rationale =
+                $"{who} finished: {reason ?? "the gate passed and was re-verified"}. " +
+                "Nothing else is open.",
+            RequestedBy = requestedBy,
+            MissionId = engine?.Mission.Id,
+        });
+
+        return decision;
+    }
+
+    /// <summary>
+    /// Sentinel command for the shutdown button.
+    /// </summary>
+    /// <remarks>
+    /// Not a real command line. <see cref="InvokeButtonAsync"/> recognises it and raises
+    /// <see cref="ShutdownApproved"/> instead of running a shell — because a button that closed
+    /// the app by shelling out to taskkill would be both fragile and allowlist-bypassable.
+    /// </remarks>
+    public const string ShutdownButtonCommand = "rolloutloud:shutdown";
+
     public IReadOnlyList<MissionEngine> Missions
     {
         get { lock (_gate) { return [.. _engines.Values]; } }
@@ -242,6 +311,21 @@ public sealed class RolloutHost
         }
 
         StateChanged?.Invoke();
+
+        // The shutdown button is a sentinel, not a command line: recognised here so it never
+        // reaches a shell, and so it can never be reached through the allowlist path either.
+        if (button.Command == ShutdownButtonCommand)
+        {
+            if (!byOperator)
+            {
+                throw new UnauthorizedAccessException(
+                    "The shutdown button is only ever clicked by the operator. Your request already " +
+                    "passed the gate — the window closes when they say so.");
+            }
+
+            ShutdownApproved?.Invoke("Operator clicked the shutdown button.");
+            return button with { Status = ButtonStatus.Succeeded, OutputExcerpt = "Closing." };
+        }
 
         // Outside the lock: this can take minutes, and holding the lock would stall the UI and
         // every other agent on the bridge.
