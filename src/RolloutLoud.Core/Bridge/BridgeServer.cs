@@ -180,6 +180,12 @@ public sealed class BridgeServer : IAsyncDisposable
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var method = request.HttpMethod;
 
+        if (segments is ["v1", "resume"] && method == "POST")
+        {
+            await ResumeAsync(context).ConfigureAwait(false);
+            return;
+        }
+
         if (segments is ["v1", "identity"] && method == "GET")
         {
             await IdentityAsync(context).ConfigureAwait(false);
@@ -739,6 +745,98 @@ public sealed class BridgeServer : IAsyncDisposable
             OffloadNow = decision.Offload,
             Reason = decision.Reason,
             Threshold = engine.Mission.Offload.TokenThreshold,
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Picks up a mission that was left running when the window closed.
+    /// </summary>
+    /// <remarks>
+    /// The ledger and the mission have always survived a restart; what did not was any way to get
+    /// back to them. Closing the window four hours into a six-hour run meant starting over — not
+    /// because the record was gone, but because nothing put it back in front of an agent.
+    ///
+    /// The briefing comes back in the response so a resumed agent needs no second call: it asked
+    /// to resume, and what it needs is the thing it would have asked for next.
+    /// </remarks>
+    private async Task ResumeAsync(HttpListenerContext context)
+    {
+        var body = await ReadAsync<ResumeRequest>(context).ConfigureAwait(false);
+
+        var engine = body?.MissionId is { } id
+            ? _host.FindMission(id)
+            : _host.Interrupted.FirstOrDefault() ?? _host.FindMission(null);
+
+        if (engine is null)
+        {
+            await WriteAsync(context, HttpStatusCode.NotFound, new ResumeResponse
+            {
+                Resumed = false,
+                Reason = _host.Missions.Count == 0
+                    ? "There are no missions in this repository to resume."
+                    : "No mission was left running. Name one with missionId, or open a new mission.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        if (engine.Mission.IsTerminal)
+        {
+            // Refused rather than reopened. A mission that reached its gate, ran out of budget or
+            // was aborted is finished, and quietly restarting it would undo a decision somebody
+            // made — including the gate's.
+            await WriteAsync(context, HttpStatusCode.Conflict, new ResumeResponse
+            {
+                Resumed = false,
+                MissionId = engine.Mission.Id,
+                Reason =
+                    $"That mission is {engine.Mission.State} and finished: {engine.Mission.Resolution}. " +
+                    "Open a new one rather than reopening a decision.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(body?.Agent) && body.Agent != engine.Mission.AgentId)
+        {
+            if (_host.FindAgent(body.Agent) is null)
+            {
+                await WriteAsync(context, HttpStatusCode.BadRequest, new ErrorResponse
+                {
+                    Error = $"Unknown agent '{body.Agent}'.",
+                    Hint = "Known: " + string.Join(", ", _host.Agents.Select(a => a.Id)),
+                }).ConfigureAwait(false);
+                return;
+            }
+
+            engine.RelayTo(body.Agent, engine.Mission.HandoffNote);
+        }
+
+        engine.Resume();
+
+        var openButtons = _host.Buttons.Count(b => b.IsOpen && b.MissionId == engine.Mission.Id);
+
+        Logged?.Invoke(
+            $"Resumed {engine.Mission.Id} on {engine.Mission.AgentId} with {engine.Ledger.Count} " +
+            $"attempt(s) of history" +
+            (openButtons > 0 ? $" and {openButtons} button(s) still waiting." : "."));
+
+        await WriteAsync(context, HttpStatusCode.OK, new ResumeResponse
+        {
+            Resumed = true,
+            Reason =
+                $"Picked up where it left off: tier {engine.Mission.EscalationTier} " +
+                $"({EscalationLadder.NameOf(engine.Mission.EscalationTier)}), " +
+                $"{engine.Ledger.Count} attempt(s) already ruled out." +
+                (openButtons > 0
+                    ? $" {openButtons} fluid button(s) were still waiting when the window closed."
+                    : string.Empty),
+            MissionId = engine.Mission.Id,
+            Objective = engine.Mission.Objective,
+            Agent = engine.Mission.AgentId,
+            Tier = engine.Mission.EscalationTier,
+            Attempts = engine.Ledger.Count,
+            OpenButtons = openButtons,
+            Briefing = BriefingComposer.ForMainSession(
+                engine.Mission, engine.Ledger, _host.HasAttachedIdentity),
         }).ConfigureAwait(false);
     }
 

@@ -205,6 +205,39 @@ public sealed record BriefingResponse
     public required bool OffloadActive { get; init; }
 }
 
+/// <summary>Picking a mission back up after the window was closed.</summary>
+public sealed record ResumeRequest
+{
+    /// <summary>Which mission. Omitted means the most recently interrupted one.</summary>
+    public string? MissionId { get; init; }
+
+    /// <summary>Hand it to a different CLI on the way back in. Defaults to the one it was on.</summary>
+    public string? Agent { get; init; }
+}
+
+public sealed record ResumeResponse
+{
+    public required bool Resumed { get; init; }
+
+    public required string Reason { get; init; }
+
+    public string? MissionId { get; init; }
+
+    public string? Objective { get; init; }
+
+    public string? Agent { get; init; }
+
+    public int Tier { get; init; }
+
+    public int Attempts { get; init; }
+
+    /// <summary>Buttons that were still waiting when the window closed.</summary>
+    public int OpenButtons { get; init; }
+
+    /// <summary>The briefing to work from, so a resumed agent needs no second call.</summary>
+    public string? Briefing { get; init; }
+}
+
 /// <summary>How big the window has become, and what to do about it.</summary>
 public sealed record ContextResponse
 {
