@@ -365,6 +365,35 @@ while it can still do something about it, instead of collecting a timeout that r
 `throttled: true` in the response means retry shortly; a plain 409 means the request itself will
 never work. They are different problems and the agent should not have to guess which it hit.
 
+## Knowing when the window got expensive
+
+The offload threshold used to be a number with nothing to compare it against. `ShouldOffload` was
+written, offered in the window as *"only once the window gets expensive"* and on the bridge as
+`"offload": "threshold"` — and **called by nothing**. The briefing made it worse by telling the
+agent *"once your context passes ~120,000 tokens, offload"*, which asks the agent to judge its own
+cost. Self-assessment is the one thing this tool exists to take away from it.
+
+There is a real reading now, from two sources, and it always says which one it used:
+
+**Measured**, from the CLI's own transcript where one exists. Claude Code records what the API
+counted — `input_tokens` plus both cache figures — so that is a fact. Verified against a live
+session reading 898,219 tokens, almost all of it cache reads.
+
+**Estimated**, from what RolloutLoud itself sent: every briefing composed, every subagent prompt
+dispatched. Exact for supervised runs, since RolloutLoud wrote the whole prompt; a floor for
+interactive ones, where it only knows its own half of the conversation. It is characters over four,
+which is a rule of thumb and wrong by a fair margin on code — so it is labelled an estimate
+everywhere it appears.
+
+With no reading at all, the threshold trigger does **not** offload. Guessing "probably expensive by
+now" would send every action through a subagent from the first turn of a mission that had barely
+started, which is what `always` is for and not what the operator asked for.
+
+> ⚠️ **The measured path reads another program's private files.** Claude Code's transcript format
+> is not a published contract and can change without notice. Every failure returns nothing, so the
+> meter falls back to estimating rather than breaking, and a reading claims to be measured only
+> when it genuinely is.
+
 ## Handing a stuck mission to a different CLI
 
 Tier 3 of the escalation ladder, and the rung with the best return: the same objective and the

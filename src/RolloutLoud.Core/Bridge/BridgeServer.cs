@@ -287,6 +287,10 @@ public sealed class BridgeServer : IAsyncDisposable
                     await RelayAsync(context, engine).ConfigureAwait(false);
                     return;
 
+                case ("context", "GET"):
+                    await ContextAsync(context, engine).ConfigureAwait(false);
+                    return;
+
                 case ("subagent", "POST"):
                     await SubagentAsync(context, engine).ConfigureAwait(false);
                     return;
@@ -707,6 +711,31 @@ public sealed class BridgeServer : IAsyncDisposable
             Agent = result.AgentId,
             TotalAttempts = engine.Ledger.Count,
             MayStop = !decision.Continue,
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Answers "how expensive have I become, and should I be offloading yet".
+    /// </summary>
+    /// <remarks>
+    /// The point of the endpoint is that the agent does not answer that question itself. It used
+    /// to: the briefing said "once your context passes ~120,000 tokens, offload", which is
+    /// self-assessment, which is the one thing this product takes away from an agent. Now
+    /// RolloutLoud reads the CLI's own transcript where it can, falls back to counting what it
+    /// sent where it cannot, and says which of the two the number is.
+    /// </remarks>
+    private async Task ContextAsync(HttpListenerContext context, MissionEngine engine)
+    {
+        var decision = _host.OffloadNow(engine.Mission);
+
+        await WriteAsync(context, HttpStatusCode.OK, new ContextResponse
+        {
+            Tokens = decision.Reading.Tokens,
+            Source = decision.Reading.Source.ToString().ToLowerInvariant(),
+            Detail = decision.Reading.Detail,
+            OffloadNow = decision.Offload,
+            Reason = decision.Reason,
+            Threshold = engine.Mission.Offload.TokenThreshold,
         }).ConfigureAwait(false);
     }
 

@@ -189,6 +189,25 @@ The only thing that can end a mission as achieved. Runs the gate, and — when i
 result is not reproducible, it is filed as a failed attempt, and the mission continues. Find out
 which of the two runs was lying.
 
+### `GET /v1/missions/active/context` — how expensive have I become?
+
+```json
+{ "tokens": 898219, "source": "measured",
+  "detail": "from the live Claude Code transcript (dab59b91…)",
+  "offloadNow": true, "threshold": 120000,
+  "reason": "898,219 tokens (measured) — … Past the 120,000 threshold — hand concrete actions to
+             subagents from here." }
+```
+
+**You do not judge your own window size.** Ask this before an action when the mission is set to
+offload past a threshold, and do what `offloadNow` says. Estimating your own context is guesswork,
+and guessing low is the expensive mistake.
+
+`source` matters. `measured` came from your CLI's own transcript — the numbers the API counted.
+`estimated` is RolloutLoud counting what it sent you, which is a floor rather than a total, because
+it cannot see anything you typed directly. `unknown` means neither was available, and the threshold
+trigger will not fire on nothing.
+
 ### `POST /v1/missions/active/subagent` — run one step somewhere else
 
 ```bash
