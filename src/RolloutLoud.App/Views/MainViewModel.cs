@@ -182,6 +182,20 @@ public sealed class MainViewModel : Observable
         OpenAllowlist = new RelayCommand(_ => WriteStarterConfiguration());
 
         host.StateChanged += OnHostChanged;
+
+        host.MissionEventLogged += e => Dispatcher.UIThread.Post(() =>
+        {
+            // Every kind, not a filtered subset. An escalation, a contradicted gate, a scope
+            // block and an injection flag are all things the operator wants to see happen, and
+            // deciding here which ones matter would be guessing on their behalf.
+            Log(e.Kind switch
+            {
+                "injection" => "⚠ " + e.Message,
+                "gate-contradicted" => "⚠ " + e.Message,
+                "scope-block" => "⚠ " + e.Message,
+                _ => $"[{e.Kind}] {e.Message}",
+            });
+        });
         bridge.Logged += message => Dispatcher.UIThread.Post(() => Log(message));
         RelayCommand.Failed += ex => Dispatcher.UIThread.Post(() => Log("Error: " + ex.Message));
 

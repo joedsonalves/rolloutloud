@@ -40,7 +40,10 @@ public sealed class RolloutHost
         foreach (var record in Store.LoadAll())
         {
             var ledger = new MissionLedger(record.Mission.Id, record.Attempts);
-            _engines[record.Mission.Id] = new MissionEngine(record.Mission, ledger, Store, paths);
+            var engine = new MissionEngine(record.Mission, ledger, Store, paths);
+
+            engine.EventLogged += e => MissionEventLogged?.Invoke(e);
+            _engines[record.Mission.Id] = engine;
         }
 
         // Tidy after loading, not before: the missions have to be known so the run folders that
@@ -153,6 +156,9 @@ public sealed class RolloutHost
     public string? ActiveMissionId { get; private set; }
 
     public event Action? StateChanged;
+
+    /// <summary>Every mission event, from every mission, for the activity log.</summary>
+    public event Action<MissionEvent>? MissionEventLogged;
 
     /// <summary>
     /// Raised when a shutdown request has passed <see cref="ShutdownGate"/> and the operator has
@@ -333,6 +339,8 @@ public sealed class RolloutHost
         }
 
         engine.Changed += _ => StateChanged?.Invoke();
+        engine.EventLogged += e => MissionEventLogged?.Invoke(e);
+
         StateChanged?.Invoke();
         return engine;
     }
