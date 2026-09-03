@@ -67,6 +67,9 @@ public sealed record MissionProposal
 
     public double? MaxHours { get; init; }
 
+    /// <summary>Dollars the run may spend. Null means no money cap.</summary>
+    public decimal? MaxSpendUsd { get; init; }
+
     public string? Offload { get; init; }
 
     /// <summary>
@@ -151,6 +154,7 @@ public sealed record MissionProposal
         {
             MaxAttempts = MaxAttempts is > 0 ? MaxAttempts.Value : 200,
             MaxWallClock = TimeSpan.FromHours(MaxHours is > 0 ? MaxHours.Value : 6),
+            MaxSpendUsd = MaxSpendUsd is > 0m ? MaxSpendUsd : null,
         },
         Offload = new OffloadSettings
         {

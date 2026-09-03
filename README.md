@@ -266,12 +266,13 @@ rollout install [--no-open]      build and open, anchored here
 rollout open [--elevated]
 rollout status
 
-rollout mission "<objective>" --gate "<command>" --scope a,b --auth "<who authorised it>"
+rollout mission "<objective>" --gate "<command>" --scope a,b --auth "<who authorised it>"  [--max-spend USD]
 rollout propose "<objective>" --gate "<command>" --why "<reasoning>"   you approve it before it runs
 rollout briefing ["<subagent task>"]
 rollout admit    "<hypothesis>" "<command>"
 rollout attempt  "<hypothesis>" "<command>" --outcome failed --learned "…"
 rollout ledger ["<text>"] [--outcome …] [--agent …] [--tier N] [--since …] [--limit N] [--full]
+rollout spend
 rollout continue
 rollout gate
 
@@ -434,6 +435,67 @@ pending, since nothing is running it any more.
 
 **A finished mission is not resumable.** Achieved, exhausted or aborted, it is refused — quietly
 restarting one would undo a decision somebody made, including the gate's.
+
+## Stopping on money, not just on time
+
+`--max-attempts` counts moves and `--max-hours` counts minutes. Neither notices that a six-hour run
+with offload on can make a hundred cheap attempts or twenty expensive ones, and only one of those
+is a bill you would have agreed to in advance.
+
+```
+rollout mission "make the integration suite pass on Windows" \
+        --gate "dotnet test tests/Integration -c Release" \
+        --max-spend 25
+```
+
+```
+rollout spend
+```
+
+```json
+{ "usd": 0.56, "source": "measured", "capUsd": 25, "remainingUsd": 24.44,
+  "byModel": [ { "model": "claude-opus-5", "usd": 0.56,
+                 "outputTokens": 504, "cacheReadTokens": 341359 } ] }
+```
+
+Reaching the cap ends the mission as `Exhausted` — the budget working, not the agent failing. Raise
+it and `rollout resume` if the work turned out to be worth more.
+
+### Where the number comes from
+
+**Measured**, summed from the CLI's own transcript, where one can be read. That is every charged
+turn added up with each kind of token at its own rate — not the context window, which is the *last*
+turn and a different quantity entirely. Output is included here even though it never enters the
+window, because it was charged for.
+
+The four rates are kept apart on purpose. A long cached run is mostly cache reads, which are around
+a tenth of the input price; pricing them as input would overstate the bill by close to an order of
+magnitude, and a $50 cap would fire at $5 of real spend.
+
+**Estimated**, from what RolloutLoud itself sent, when nothing can be read. It is a floor — it
+cannot see what the agent read on its own — and it is labelled an estimate everywhere it appears.
+
+⚠️ **The cap fires on either, and that is deliberate.** The offload threshold takes the opposite
+line and does nothing without a real reading, because acting on a guess there makes every action
+worse for the rest of the session. Money is not symmetric: failing open spends real money that
+cannot be got back, while failing closed costs one `rollout resume`. So the stop reason says which
+kind of number stopped you, and if the estimate looks high, raise the cap rather than distrusting
+the brake.
+
+### Prices age, so they live in a file
+
+`.rolloutloud/pricing.json`, written alongside `allowlist.json` and `agents.json`, in dollars per
+million tokens per model. Matching is by prefix, so `claude-opus-4-5-20260514` is priced by the
+`claude-opus` entry and a dated build does not go unpriced the moment it ships.
+
+A model with **no** entry is priced at nothing rather than at a guess, and its tokens are reported
+separately — `"unpricedTokens"` — so a bill never quietly leaves something out of a number you are
+trusting.
+
+Only Claude Code has a transcript RolloutLoud can read. The other three fall back to the estimate;
+adding a probe and adding a price for one of them is a single job, not two.
+
+---
 
 ## Knowing when a run has stopped paying
 

@@ -4,6 +4,7 @@ using RolloutLoud.Core.Context;
 using RolloutLoud.Core.Elevation;
 using RolloutLoud.Core.Execution;
 using RolloutLoud.Core.Missions;
+using RolloutLoud.Core.Money;
 using RolloutLoud.Core.Workspace;
 
 namespace RolloutLoud.Core;
@@ -29,6 +30,8 @@ public sealed class RolloutHost
     private DateTime _allowlistStamp = DateTime.MinValue;
     private IReadOnlyList<AgentDescriptor> _agents = AgentCatalog.Defaults;
     private DateTime _agentsStamp = DateTime.MinValue;
+    private TokenPrices _prices = TokenPrices.Default;
+    private DateTime _pricesStamp = DateTime.MinValue;
 
     public RolloutHost(RolloutPaths paths, IElevationService elevation)
     {
@@ -40,6 +43,7 @@ public sealed class RolloutHost
         Buttons_ = new ButtonStore(paths);
         Housekeeping = new Housekeeper(paths);
         Context = new ContextMeter();
+        Spend = new SpendMeter(() => Prices);
 
         foreach (var button in Buttons_.Load())
         {
@@ -49,9 +53,14 @@ public sealed class RolloutHost
         foreach (var record in Store.LoadAll())
         {
             var ledger = new MissionLedger(record.Mission.Id, record.Attempts);
+            // ⚠️ Both hooks, and the second is easy to miss because this path uses an object
+            // initialiser while CreateMission assigns them one by one. Wiring only the new-mission
+            // path gives a money cap that works until RolloutLoud is restarted and then silently
+            // does not — on exactly the long runs a spend cap exists for.
             var engine = new MissionEngine(record.Mission, ledger, Store, paths)
             {
                 ReadContextTokens = TokensFor,
+                ReadSpend = BudgetFor,
             };
 
             engine.EventLogged += e => MissionEventLogged?.Invoke(e);
@@ -86,6 +95,47 @@ public sealed class RolloutHost
         var reading = Context.Read(agentId, Paths.RepositoryRoot);
         return reading.HasNumber ? reading.Tokens : null;
     }
+
+    /// <summary>What a mission has spent, and whether that is past its cap.</summary>
+    public SpendMeter Spend { get; }
+
+    /// <summary>The current price list, re-read whenever pricing.json changes.</summary>
+    /// <remarks>
+    /// Live for the same reason the allowlist and the agent catalogue are: the operator corrects a
+    /// price precisely in the middle of a run — a cap fired at a figure that looked wrong — and
+    /// making the edit wait for a restart means it does nothing at the one moment it was wanted.
+    /// </remarks>
+    public TokenPrices Prices
+    {
+        get
+        {
+            var stamp = File.Exists(Paths.PricingFile)
+                ? File.GetLastWriteTimeUtc(Paths.PricingFile)
+                : DateTime.MinValue;
+
+            lock (_gate)
+            {
+                if (stamp != _pricesStamp)
+                {
+                    _prices = TokenPrices.Load(Paths.PricingFile);
+                    _pricesStamp = stamp;
+                }
+
+                return _prices;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The money brake for one mission.
+    /// </summary>
+    /// <remarks>
+    /// The estimate handed in as a fallback is the context reading, which is what RolloutLoud knows
+    /// it sent. It is a floor and it is labelled one — but a floor that stops a run is better than
+    /// a cap that silently never fires, which is what an unmeasurable agent would otherwise get.
+    /// </remarks>
+    private BudgetVerdict BudgetFor(Mission mission) =>
+        Spend.Evaluate(mission, Paths.RepositoryRoot, TokensFor(mission.AgentId));
 
     /// <summary>What the last tidy found and removed. Shown in the window.</summary>
     public HousekeepingReport? LastHousekeeping { get; private set; }
@@ -380,6 +430,7 @@ public sealed class RolloutHost
         {
             engine = MissionEngine.Create(mission, Store, Paths);
             engine.ReadContextTokens = TokensFor;
+            engine.ReadSpend = BudgetFor;
             _engines[mission.Id] = engine;
             ActiveMissionId = mission.Id;
         }

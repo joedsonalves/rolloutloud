@@ -29,6 +29,16 @@ public sealed class RolloutPaths
     public string BridgeHandshakeFile => Path.Combine(StateRoot, "bridge.json");
     public string AgentsFile => Path.Combine(StateRoot, "agents.json");
 
+    /// <summary>
+    /// What a token costs, per model. Overrides the shipped list.
+    /// </summary>
+    /// <remarks>
+    /// A file rather than a constant because this table ages: prices change, models are renamed,
+    /// and a figure baked into a release is wrong within months — at which point the money brake is
+    /// stopping runs on a number nobody has checked since.
+    /// </remarks>
+    public string PricingFile => Path.Combine(StateRoot, "pricing.json");
+
     /// <summary>Details the operator has lent to agents. Absent by default, and absence means no.</summary>
     public string IdentityFile => Path.Combine(StateRoot, "identity.json");
 

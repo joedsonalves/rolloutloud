@@ -300,6 +300,17 @@
                 <TextBlock Grid.Column="2" Text="{loc:Tr Key=stop.maxHours}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" Margin="12,0,0,0" />
                 <NumericUpDown Grid.Column="3" MinWidth="140" Value="{Binding MaxHours}" Minimum="0.1" Maximum="72" Increment="0.5" FormatString="0.0" />
               </Grid>
+
+              <!-- The third brake, and the only one denominated in something the operator actually
+                   feels. Zero means off, because a money cap nobody chose is one they raise
+                   without reading when it fires. -->
+              <Grid ColumnDefinitions="Auto,150,*" ColumnSpacing="8">
+                <TextBlock Grid.Column="0" Text="{loc:Tr Key=stop.maxSpend}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
+                <NumericUpDown Grid.Column="1" MinWidth="150" Value="{Binding MaxSpendUsd}" Minimum="0" Maximum="10000" Increment="5" FormatString="0.00" />
+                <TextBlock Grid.Column="2" Text="{Binding SpendSummary}" Classes="hint" VerticalAlignment="Center" Margin="12,0,0,0" />
+              </Grid>
+
+              <TextBlock Text="{loc:Tr Key=stop.maxSpend.hint}" Classes="hint" />
             </StackPanel>
           </Border>
 

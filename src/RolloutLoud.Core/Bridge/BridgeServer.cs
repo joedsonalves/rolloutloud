@@ -328,6 +328,10 @@ public sealed class BridgeServer : IAsyncDisposable
                     await ContextAsync(context, engine).ConfigureAwait(false);
                     return;
 
+                case ("spend", "GET"):
+                    await SpendAsync(context, engine).ConfigureAwait(false);
+                    return;
+
                 case ("subagent", "POST"):
                     await SubagentAsync(context, engine).ConfigureAwait(false);
                     return;
@@ -417,6 +421,7 @@ public sealed class BridgeServer : IAsyncDisposable
             Authorization = body.Authorization,
             MaxAttempts = body.MaxAttempts,
             MaxHours = body.MaxHours,
+            MaxSpendUsd = body.MaxSpendUsd,
             Offload = body.Offload,
             Rationale = body.Rationale,
             Review = new GateReview { Findings = [], Headline = string.Empty },
@@ -552,6 +557,7 @@ public sealed class BridgeServer : IAsyncDisposable
             {
                 MaxAttempts = body.MaxAttempts is > 0 ? body.MaxAttempts.Value : 200,
                 MaxWallClock = TimeSpan.FromHours(body.MaxHours is > 0 ? body.MaxHours.Value : 6),
+                MaxSpendUsd = body.MaxSpendUsd is > 0m ? body.MaxSpendUsd : null,
             },
             Offload = new OffloadSettings
             {
@@ -938,6 +944,48 @@ public sealed class BridgeServer : IAsyncDisposable
         }).ConfigureAwait(false);
     }
 
+
+    /// <summary>
+    /// What this mission has cost, and how close that is to its cap.
+    /// </summary>
+    /// <remarks>
+    /// Exposed to the agent as well as the operator on purpose. An agent that knows it has spent
+    /// eight of ten dollars can choose the cheap experiment next, and that is a better decision than
+    /// the one it makes after being stopped mid-thought by a cap it could not see coming.
+    ///
+    /// It is a reading, never a lever: nothing here lets the agent raise its own budget.
+    /// </remarks>
+    private async Task SpendAsync(HttpListenerContext context, MissionEngine engine)
+    {
+        var verdict = _host.Spend.Evaluate(engine.Mission, _host.Paths.RepositoryRoot);
+        var reading = verdict.Reading;
+        var cap = engine.Mission.Stop.MaxSpendUsd;
+
+        await WriteAsync(context, HttpStatusCode.OK, new
+        {
+            usd = reading.Usd,
+            source = reading.Source.ToString().ToLowerInvariant(),
+            detail = reading.Detail,
+            capUsd = cap,
+            remainingUsd = cap is null || !reading.HasNumber ? null : (decimal?)(cap.Value - reading.Usd),
+            overBudget = verdict.OverBudget,
+            unpricedTokens = reading.UnpricedTokens,
+            byModel = reading.ByModel.Select(m => new
+            {
+                model = m.Model,
+                usd = m.Usd,
+                inputTokens = m.InputTokens,
+                outputTokens = m.OutputTokens,
+                cacheWriteTokens = m.CacheWriteTokens,
+                cacheReadTokens = m.CacheReadTokens,
+            }),
+            note = cap is null
+                ? "No money cap on this mission. The attempt and wall-clock caps still apply."
+                : reading.HasNumber
+                    ? "Spend it on the experiment most likely to move the gate, not the cheapest one."
+                    : "Nothing can read this agent's token counts, so the figure is what RolloutLoud sent.",
+        }).ConfigureAwait(false);
+    }
     /// <summary>
     /// Picks up a mission that was left running when the window closed.
     /// </summary>
