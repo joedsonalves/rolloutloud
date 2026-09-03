@@ -1,3 +1,5 @@
+using RolloutLoud.Core.Safety;
+
 namespace RolloutLoud.Core.Missions;
 
 /// <summary>Why an attempt was refused before it ran.</summary>
@@ -198,7 +200,12 @@ public sealed class MissionLedger
             lines.Add($"    ran: {Truncate(attempt.Command, 200)}");
             if (!string.IsNullOrWhiteSpace(attempt.Observation))
             {
-                lines.Add($"    learned: {Truncate(attempt.Observation, 300)}");
+                // Defanged, not fenced per entry. An observation is written by an agent that has
+                // been reading target output, so it can carry text nobody vouched for — but
+                // wrapping forty of them in forty fences produces a document where the warning is
+                // wallpaper. The whole ledger block is fenced once by the briefing; what happens
+                // here is breaking any marker that would close that fence early.
+                lines.Add($"    learned: {Truncate(UntrustedText.Defang(attempt.Observation), 300)}");
             }
         }
 

@@ -1,5 +1,6 @@
 using System.Text;
 using RolloutLoud.Core.Missions;
+using RolloutLoud.Core.Safety;
 
 namespace RolloutLoud.Core.Offload;
 
@@ -120,7 +121,7 @@ public static class BriefingComposer
             {
                 sb.AppendLine("What the previous agent wanted you to know:");
                 sb.AppendLine();
-                sb.AppendLine("> " + mission.HandoffNote!.ReplaceLineEndings(Environment.NewLine + "> "));
+                sb.AppendLine(UntrustedText.Fence(mission.HandoffNote, "handoff note"));
                 sb.AppendLine();
                 sb.AppendLine(
                     "Treat that as one agent's opinion, not as fact. It is there because it names " +
@@ -131,7 +132,9 @@ public static class BriefingComposer
 
         sb.AppendLine("## Ledger");
         sb.AppendLine();
-        sb.AppendLine(ledger.Summarize());
+        sb.AppendLine(UntrustedText.Preamble);
+        sb.AppendLine();
+        sb.AppendLine(UntrustedText.Fence(ledger.Summarize(), "ledger"));
         sb.AppendLine();
 
         sb.AppendLine("## If you need an identity");
@@ -174,7 +177,9 @@ public static class BriefingComposer
 
         sb.AppendLine("## Already ruled out");
         sb.AppendLine();
-        sb.AppendLine(ledger.Summarize(mission.Offload.LedgerEntriesInBriefing));
+        sb.AppendLine(UntrustedText.Preamble);
+        sb.AppendLine();
+        sb.AppendLine(UntrustedText.Fence(ledger.Summarize(mission.Offload.LedgerEntriesInBriefing), "ledger"));
         sb.AppendLine();
 
         sb.AppendLine("## What you return");
