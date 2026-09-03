@@ -266,6 +266,27 @@ switched on. Narrow the question instead — that is nearly always what you actu
 `matched: 0` is an **answer**, not an empty result: nothing like this has been tried, so what you
 are about to do is not a repeat.
 
+### `GET /v1/missions/active/spend` — how much has this cost?
+
+```json
+{ "usd": 0.56, "source": "measured", "capUsd": 5, "remainingUsd": 4.44,
+  "overBudget": false, "unpricedTokens": 0,
+  "byModel": [ { "model": "claude-opus-5", "usd": 0.56,
+                 "inputTokens": 2, "outputTokens": 504,
+                 "cacheWriteTokens": 473, "cacheReadTokens": 341359 } ] }
+```
+
+Summed from your CLI's own transcript where one can be read, so `source: "measured"` is what the
+API counted rather than a guess. `"estimated"` means nothing could be read and the figure is
+RolloutLoud pricing what it sent — **a floor**, since it cannot see what you read on your own.
+
+Ask it when you are choosing between a cheap experiment and an expensive one. Knowing you have
+spent eight of ten dollars is a better input to that choice than being stopped mid-thought by a cap
+you could not see coming.
+
+⚠️ **It is a reading, not a lever.** Nothing here raises your own budget. Reaching `capUsd` ends the
+mission as `Exhausted` on your next `/continue`, and only the operator can raise it.
+
 ### `GET /v1/missions/active/continue` — may I stop?
 
 Almost always no. `continue: false` comes from a stop condition or the operator, never from an

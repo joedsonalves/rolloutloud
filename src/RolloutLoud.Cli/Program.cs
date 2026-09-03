@@ -34,6 +34,7 @@ internal static class Program
             "resume" => await ResumeAsync(paths, rest).ConfigureAwait(false),
             "propose" => await ProposeAsync(paths, rest).ConfigureAwait(false),
             "ledger" => await LedgerAsync(paths, rest).ConfigureAwait(false),
+            "spend" => await SimpleGetAsync(paths, "/v1/missions/active/spend").ConfigureAwait(false),
             "status" => await StatusAsync(paths).ConfigureAwait(false),
             "mission" => await MissionAsync(paths, rest).ConfigureAwait(false),
             "briefing" => await BriefingAsync(paths, rest).ConfigureAwait(false),
@@ -353,7 +354,7 @@ internal static class Program
         {
             Console.Error.WriteLine("Usage: rollout mission \"<objective>\" [--agent claude] [--gate \"<cmd>\"] " +
                                     "[--scope a,b] [--auth \"<who authorised it>\"] [--offload always|threshold] " +
-                                    "[--max-attempts N] [--max-hours N]");
+                                    "[--max-attempts N] [--max-hours N] [--max-spend USD]");
             return 1;
         }
 
@@ -381,6 +382,11 @@ internal static class Program
         if (double.TryParse(Option(args, "--max-hours"), out var hours))
         {
             payload["maxHours"] = hours;
+        }
+
+        if (decimal.TryParse(SpendCap(args), out var spend))
+        {
+            payload["maxSpendUsd"] = spend;
         }
 
         return await SendAsync(paths, client => client.PostAsync("/v1/missions", payload)).ConfigureAwait(false);
@@ -491,6 +497,7 @@ internal static class Program
                 "Usage: rollout propose \"<objective>\" [--gate \"<command>\"] [--why \"<reasoning>\"]\n" +
                 "                       [--agent <id>] [--scope a,b] [--auth \"<who authorised it>\"]\n" +
                 "                       [--offload always|threshold] [--max-attempts N] [--max-hours N]\n" +
+                "                       [--max-spend USD]\n" +
                 "                       [--no-wait]\n\n" +
                 "The gate is a command that must exit 0, and it should RE-DERIVE the result — a test,\n" +
                 "a build, the scan run again. A gate that checks a file you wrote is you marking your\n" +
@@ -533,6 +540,11 @@ internal static class Program
         if (double.TryParse(Option(args, "--max-hours"), out var hours))
         {
             payload["maxHours"] = hours;
+        }
+
+        if (decimal.TryParse(SpendCap(args), out var spend))
+        {
+            payload["maxSpendUsd"] = spend;
         }
 
         var client = BridgeClient.Discover(paths);
@@ -796,6 +808,18 @@ internal static class Program
         return null;
     }
 
+    /// <summary>
+    /// The money cap, with the punctuation an operator naturally types taken off.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Without this, <c>--max-spend $20</c> fails to parse and the mission runs with **no money
+    /// brake at all**, silently, while the operator believes they set one. Failing loudly on a
+    /// malformed cap would be acceptable; failing silently on a safety limit is not, so the two
+    /// obvious spellings — a dollar sign and a thousands comma — have to work.
+    /// </remarks>
+    private static string? SpendCap(string[] args) =>
+        Option(args, "--max-spend")?.Trim().TrimStart('$').Replace(",", string.Empty);
+
     private static string? Option(string[] args, string name)
     {
         for (var i = 0; i < args.Length - 1; i++)
@@ -833,7 +857,7 @@ internal static class Program
               rollout mission "<objective>" [--agent claude] [--gate "<command>"]
                                              [--scope a,b] [--auth "<who authorised it>"]
                                              [--offload always|threshold]
-                                             [--max-attempts N] [--max-hours N]
+                                             [--max-attempts N] [--max-hours N] [--max-spend USD]
               rollout briefing ["<subagent task>"]   The briefing; with a task, the subagent form.
               rollout admit "<hypothesis>" "<command>"
                                              Ask before running. Rejects repeats and out-of-scope.
@@ -856,6 +880,7 @@ internal static class Program
                                              [--since ...] [--limit N] [--full]
                                              What has already been tried. Filtered and paged —
                                              there is no way to fetch the lot, on purpose.
+              rollout spend                    What this mission has cost so far, against its cap.
               rollout continue                 Whether you may stop. Almost always: no.
               rollout gate                     Ask the success gate. The only way a mission ends.
 

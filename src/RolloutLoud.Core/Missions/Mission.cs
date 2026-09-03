@@ -125,6 +125,20 @@ public sealed record StopConditions
     public TimeSpan MaxWallClock { get; init; } = TimeSpan.FromHours(6);
 
     /// <summary>
+    /// Dollars this mission may spend before it stops. Null means no money cap.
+    /// </summary>
+    /// <remarks>
+    /// The cap the other two do not cover. Attempts count moves and the clock counts minutes, and a
+    /// six-hour run with offload on can make a hundred cheap attempts or twenty expensive ones —
+    /// only one of those is a bill the operator would have agreed to in advance.
+    ///
+    /// ⚠️ Null rather than a default figure, and that is not laziness. Any number picked here would
+    /// be wrong for somebody, and a cap the operator did not choose is one they will not believe
+    /// when it fires — they will raise it without reading it, which is worse than not having one.
+    /// </remarks>
+    public decimal? MaxSpendUsd { get; init; }
+
+    /// <summary>
     /// Consecutive attempts that produced no new information before the ladder is forced upward.
     /// Not a stop — a shove. Repeating a failed idea is the default behaviour we are correcting.
     /// </summary>

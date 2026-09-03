@@ -55,6 +55,8 @@ public sealed record MissionRequest
     public int? MaxAttempts { get; init; }
 
     public double? MaxHours { get; init; }
+    /// <summary>Dollars this mission may spend before it stops. Absent means no money cap.</summary>
+    public decimal? MaxSpendUsd { get; init; }
 }
 
 /// <summary>
@@ -90,6 +92,8 @@ public sealed record ProposalRequest
     public int? MaxAttempts { get; init; }
 
     public double? MaxHours { get; init; }
+    /// <summary>Dollars this mission may spend before it stops. Absent means no money cap.</summary>
+    public decimal? MaxSpendUsd { get; init; }
 
     /// <summary>Why this gate and this scope. The field that makes the operator's review quick.</summary>
     public string? Rationale { get; init; }

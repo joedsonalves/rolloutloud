@@ -8,6 +8,7 @@ using RolloutLoud.Core.Bridge;
 using RolloutLoud.Core.Buttons;
 using RolloutLoud.Core.Localization;
 using RolloutLoud.Core.Missions;
+using RolloutLoud.Core.Money;
 using RolloutLoud.Core.Watchdog;
 using RolloutLoud.Core.Workspace;
 
@@ -260,6 +261,7 @@ public sealed class MainViewModel : Observable
     private int _tokenThreshold = 120_000;
     private int _maxAttempts = 200;
     private double _maxHours = 6;
+    private decimal _maxSpendUsd;
     private bool _watchdogEnabled = true;
     private bool _allowUnattendedShutdown;
     private MissionSummaryItem? _selectedMission;
@@ -692,6 +694,47 @@ public sealed class MainViewModel : Observable
         set => Set(ref _maxAttempts, value);
     }
 
+    /// <summary>
+    /// Dollars this mission may spend. Zero means no money cap.
+    /// </summary>
+    /// <remarks>
+    /// Zero-means-off rather than a sensible default figure, and that is deliberate. Any number
+    /// picked here would be wrong for somebody, and a cap the operator did not choose is one they
+    /// will raise without reading when it fires — which is worse than not having one, because they
+    /// stop believing the brake.
+    /// </remarks>
+    public decimal MaxSpendUsd
+    {
+        get => _maxSpendUsd;
+        set
+        {
+            Set(ref _maxSpendUsd, value);
+            Raise(nameof(SpendSummary));
+        }
+    }
+
+    /// <summary>What the running mission has cost so far, next to the box where the cap is set.</summary>
+    /// <remarks>
+    /// Shown beside the field rather than in a panel of its own: the number that makes a cap
+    /// meaningful is what the last run actually cost, and an operator typing a figure with no idea
+    /// of the scale is guessing.
+    /// </remarks>
+    public string SpendSummary
+    {
+        get
+        {
+            if (_mission is null)
+            {
+                return Localizer.Current["stop.maxSpend.none"];
+            }
+
+            var reading = _host.Spend.Read(
+                _mission.Mission.AgentId, _host.Paths.RepositoryRoot, _mission.Mission.StartedAt);
+
+            return reading.HasNumber ? reading.Summary : Localizer.Current["stop.maxSpend.none"];
+        }
+    }
+
     public double MaxHours
     {
         get => _maxHours;
@@ -866,6 +909,7 @@ public sealed class MainViewModel : Observable
             {
                 MaxAttempts = Math.Max(1, MaxAttempts),
                 MaxWallClock = TimeSpan.FromHours(Math.Max(0.1, MaxHours)),
+                MaxSpendUsd = MaxSpendUsd > 0m ? MaxSpendUsd : null,
             },
             Offload = new OffloadSettings
             {
@@ -1013,6 +1057,13 @@ public sealed class MainViewModel : Observable
             AgentCatalog.WriteDefaults(_host.Paths.AgentsFile);
         }
 
+        // Written out so the operator can see and correct it. This table ages faster than any
+        // other file here, and a price nobody can find is one nobody fixes.
+        if (!File.Exists(_host.Paths.PricingFile))
+        {
+            TokenPrices.WriteDefaults(_host.Paths.PricingFile);
+        }
+
         _host.ReloadConfiguration();
         Log($"Configuration written to {_host.Paths.StateRoot}. Edit allowlist.json to let agents self-invoke buttons.");
         return Task.CompletedTask;
@@ -1152,6 +1203,7 @@ public sealed class MainViewModel : Observable
         Raise(nameof(MissionSummary));
         Raise(nameof(RelayHistory));
         Raise(nameof(ContextReadingSummary));
+        Raise(nameof(SpendSummary));
         Raise(nameof(ProgressSummary));
         Raise(nameof(PauseLabel));
         PauseMission.RaiseCanExecuteChanged();
