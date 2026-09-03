@@ -157,6 +157,7 @@ public sealed class MainViewModel : Observable
     private ThemeChoice _theme =
         UiPreferences.Load().Effective == ThemeChoice.Light ? ThemeChoice.Light : ThemeChoice.Dark;
     private double _watchdogRoundMinutes = 20;
+    private bool _relayBetweenAgents = true;
     private string _selectedAgentId = AgentCatalog.Claude;
     private MissionEngine? _mission;
 
@@ -175,6 +176,8 @@ public sealed class MainViewModel : Observable
         ToggleSupervision = new RelayCommand(_ => ToggleSupervisionAsync(), _ => _mission is not null);
         Elevate = new RelayCommand(_ => ElevateAsync(), _ => !IsElevated && _host.Elevation.CanElevate);
         ToggleTheme = new RelayCommand(_ => FlipTheme());
+        AttachIdentity = new RelayCommand(_ => AttachIdentityFile());
+        RevealIdentity = new RelayCommand(_ => RevealIdentityFile(), _ => IdentityAttached);
         OpenAllowlist = new RelayCommand(_ => WriteStarterConfiguration());
 
         host.StateChanged += OnHostChanged;
@@ -299,6 +302,78 @@ public sealed class MainViewModel : Observable
         return Task.CompletedTask;
     }
 
+    // ---- attached identity ------------------------------------------------------------------
+
+    public bool IdentityAttached => _host.HasAttachedIdentity;
+
+    public string IdentityStatus =>
+        Localizer.Current[IdentityAttached ? "identity.attached" : "identity.none"];
+
+    /// <summary>
+    /// Shown whenever a file is attached, not tucked behind a link.
+    /// </summary>
+    /// <remarks>
+    /// The operator asked for this specifically, and they were right: the moment that matters is
+    /// when somebody is about to put something in the file, not when they read the README six
+    /// months ago. It names what does not belong there rather than saying "no secrets" — a
+    /// blanket rule that gets ignored protects nothing, and a throwaway password for a disposable
+    /// account is exactly what the feature is for.
+    /// </remarks>
+    public string IdentityWarning => Localizer.Current["identity.warning"];
+
+    public RelayCommand AttachIdentity { get; }
+
+    public RelayCommand RevealIdentity { get; }
+
+    private Task AttachIdentityFile()
+    {
+        var file = _host.Paths.IdentityFile;
+
+        if (File.Exists(file))
+        {
+            Log($"An identity file already exists at {file}. Edit it rather than replacing it.");
+            return RevealIdentityFile();
+        }
+
+        AttachedIdentity.WriteTemplate(file);
+        Log($"Wrote {file}. Edit it, then agents can ask for it by site.");
+        Log("⚠ Anything in that file reaches the model provider. Throwaway test credentials only — " +
+            "no payment details, no password you use anywhere real, no recovery codes.");
+
+        RefreshIdentity();
+        return RevealIdentityFile();
+    }
+
+    private Task RevealIdentityFile()
+    {
+        var file = _host.Paths.IdentityFile;
+        if (!File.Exists(file))
+        {
+            return Task.CompletedTask;
+        }
+
+        try
+        {
+            // UseShellExecute so the OS opens it in whatever the operator edits JSON with, rather
+            // than this app deciding on an editor.
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo { FileName = file, UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            Log($"Could not open {file}: {ex.Message}");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void RefreshIdentity()
+    {
+        Raise(nameof(IdentityAttached));
+        Raise(nameof(IdentityStatus));
+        RevealIdentity.RaiseCanExecuteChanged();
+    }
+
     public string RepositoryRoot => _host.Paths.RepositoryRoot;
 
     public string BridgeHint => Localizer.Current.Format("app.bridge.hint", _bridge.Endpoint);
@@ -420,6 +495,20 @@ public sealed class MainViewModel : Observable
         set => Set(ref _watchdogRoundMinutes, value);
     }
 
+    /// <summary>
+    /// Whether a stuck mission is handed to a different CLI on its own.
+    /// </summary>
+    /// <remarks>
+    /// On by default, because the rung is useless if it needs somebody awake to trigger it — the
+    /// whole point of a tier-3 escalation is that it happens at 3am when the current agent has run
+    /// out of habits.
+    /// </remarks>
+    public bool RelayBetweenAgents
+    {
+        get => _relayBetweenAgents;
+        set => Set(ref _relayBetweenAgents, value);
+    }
+
     public string WatchdogStatus => _supervisor.IsRunning
         ? Localizer.Current.Format("watchdog.status.running", _supervisor.AgentId, _supervisor.Round)
         : Localizer.Current["watchdog.status.idle"];
@@ -436,6 +525,12 @@ public sealed class MainViewModel : Observable
             EscalationLadder.NameOf(_mission.Mission.EscalationTier),
             _mission.Ledger.Count,
             _mission.Mission.AgentId);
+
+    /// <summary>Who has already worked the current mission, if anyone.</summary>
+    public string RelayHistory =>
+        _mission is { Mission.RelayHistory.Count: > 0 }
+            ? Localizer.Current.Format("mission.relayed", string.Join(" → ", _mission.Mission.RelayHistory))
+            : string.Empty;
 
     public string PauseLabel =>
         Localizer.Current[_mission?.Mission.State == MissionState.Paused ? "action.resume" : "action.pause"];
@@ -615,6 +710,7 @@ public sealed class MainViewModel : Observable
         _supervisor.Settings = _supervisor.Settings with
         {
             RoundTimeout = TimeSpan.FromMinutes(Math.Max(1, WatchdogRoundMinutes)),
+            RelayBetweenAgents = RelayBetweenAgents,
         };
 
         // Supervised rounds are headless — there is no terminal for the operator to type into.
@@ -714,6 +810,7 @@ public sealed class MainViewModel : Observable
         SyncButtons();
         SyncMissions();
         RefreshMission();
+        RefreshIdentity();
     });
 
     private void SyncMissions()
@@ -730,6 +827,27 @@ public sealed class MainViewModel : Observable
                 existing.Refresh();
             }
         }
+
+        // Follow the host's active mission when the window is not already on one.
+        //
+        // Without this, a mission opened through the bridge — which is the main flow, since that
+        // is how an agent starts work — left the list populated but nothing selected, the summary
+        // reading "no mission", and Pause/Abort/Check gate all disabled. The window looked like
+        // nothing had happened while an agent was already working.
+        if (_selectedMission is not null || _host.ActiveMissionId is not { } active)
+        {
+            return;
+        }
+
+        var item = OpenMissions.FirstOrDefault(m => m.Id == active);
+        if (item is null)
+        {
+            return;
+        }
+
+        _selectedMission = item;
+        _mission = _host.FindMission(active);
+        Raise(nameof(SelectedMission));
     }
 
     /// <summary>Records why the window is about to close, so the last log line explains it.</summary>
@@ -762,6 +880,7 @@ public sealed class MainViewModel : Observable
     private void RefreshMission()
     {
         Raise(nameof(MissionSummary));
+        Raise(nameof(RelayHistory));
         Raise(nameof(PauseLabel));
         PauseMission.RaiseCanExecuteChanged();
         AbortMission.RaiseCanExecuteChanged();

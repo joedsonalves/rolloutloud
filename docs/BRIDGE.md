@@ -176,9 +176,16 @@ which of the two runs was lying.
 curl -X POST "$EP/v1/missions/active/relay" -H "X-RolloutLoud-Token: $TK" -d '{"agent": "codex"}'
 ```
 
-The ledger goes with it. Before handing off, write the paragraph you would want to read if you
-were picking this up cold: what you now believe about the target, and which of your assumptions
-you no longer trust.
+The ledger goes with it, and so does a handoff note.
+
+**Under supervision this fires on its own** when the ladder reaches tier 3, and you will be asked
+for that paragraph before it happens. Write what you have come to *believe* that is not obvious
+from the attempts, and which of your own assumptions you stopped trusting. Do not summarise what
+you tried — the next agent can read the ledger.
+
+If you are the agent that arrives, your briefing says who worked it before you and carries their
+paragraph, framed as opinion rather than fact: they are the one who got stuck holding it. The
+ledger still binds, so you cannot repeat what they tried.
 
 ---
 
@@ -209,8 +216,8 @@ a formality — it is what the audit line records, and that record is why anythi
 `.rolloutloud/identity-access.log` and shown in the operator's activity feed, granted or not. It
 is deliberately not in your briefing, so asking is a visible act.
 
-⚠️ **There are no passwords or payment details in there, by design.** If a step needs a secret,
-post a fluid button and let the operator run it.
+⚠️ **A throwaway password for a disposable account may be in there; anything valuable is not.**
+If a step needs a real secret, post a fluid button and let the operator run it.
 
 ---
 

@@ -302,9 +302,43 @@ which is the right way round.
 - Delete the file to withdraw it. It is re-read on every request, so that takes effect at once.
 
 > ⚠️ **This is plaintext on disk, and anything read from it becomes part of an agent's context —
-> which means it reaches the model provider.** Use an address you are willing to have there, like a
-> `+tag` alias. There is deliberately no place for passwords, payment details or recovery codes: if
-> a step needs a secret, the agent should post a fluid button and let you run it.
+> which means it reaches the model provider.** The window says so whenever a file is attached,
+> because the moment that matters is when you are about to put something in it.
+>
+> A throwaway password for a disposable test account belongs here — that is what the feature is
+> for, and refusing to carry one would only push you into pasting it into a chat instead. What does
+> not belong: payment details, a password you use anywhere real, recovery codes, and API keys with
+> spend attached. If a step needs one of those, the agent should post a fluid button and let you
+> run it.
+
+## Handing a stuck mission to a different CLI
+
+Tier 3 of the escalation ladder, and the rung with the best return: the same objective and the
+same ledger handed to a different model regularly finds what the first could not, because the
+failure was in one model's habits rather than in the problem.
+
+It fires **on its own**, which is the point — a tier-3 escalation happens at 3am when the current
+agent has run out of habits, and a rung that needs somebody awake to pull it is a rung that never
+gets used.
+
+Before handing over, the outgoing agent is asked for one paragraph: what it now *believes* about
+the problem, and which of its own assumptions it stopped trusting. The ledger already says what was
+tried; only the agent that tried it can say those two things. The new agent gets that paragraph
+framed as one agent's opinion, because the agent holding it is the one that got stuck.
+
+Two rules decide who is next, and both matter more than they look:
+
+- **Never back to an agent that has already worked it.** It would bring the same habits that got
+  stuck, and — since the ledger forbids its own spent attempts — arrive with fewer moves than it
+  had the first time.
+- **Never to a CLI that is not installed**, or one with no one-shot prompt argument, since neither
+  can be driven headlessly. Resolution walks `PATH` against `PATHEXT`, which matters on Windows
+  where two of these four ship as `.cmd` shims rather than `.exe`.
+
+With nobody left, the ladder moves to tier 4 — stop and brief the operator — rather than spinning
+on a rung it cannot climb. The tier drops back to 1 on the way through: not a reset of progress,
+since the ledger still forbids everything spent, but because "hand this off" is not an instruction
+a freshly arrived agent can act on.
 
 ## Running out of tokens mid-mission
 

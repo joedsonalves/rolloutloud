@@ -186,7 +186,34 @@
                 <NumericUpDown Grid.Column="1" MinWidth="140" Value="{Binding WatchdogRoundMinutes}" Increment="1" Minimum="1" Maximum="120" FormatString="0" />
               </Grid>
 
+              <CheckBox IsChecked="{Binding RelayBetweenAgents}" Content="{loc:Tr Key=watchdog.relay}"
+                        IsEnabled="{Binding WatchdogEnabled}" />
+              <TextBlock Text="{loc:Tr Key=watchdog.relay.hint}" Classes="hint" Margin="20,0,0,0" />
+
               <TextBlock Text="{Binding WatchdogStatus}" Classes="hint" />
+            </StackPanel>
+          </Border>
+
+          <!-- Attached identity. The warning is shown whenever a file exists rather than hidden
+               behind a link: the moment that matters is when somebody is about to put something
+               in the file, not when they last read the README. -->
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{loc:Tr Key=identity.title}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{Binding IdentityStatus}" Classes="hint" />
+
+              <Border Background="{DynamicResource RlSurfaceSunken}" CornerRadius="4" Padding="10"
+                      IsVisible="{Binding IdentityAttached}">
+                <TextBlock Text="{Binding IdentityWarning}" TextWrapping="Wrap" FontSize="11"
+                           Foreground="{DynamicResource RlWarning}" />
+              </Border>
+
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button Content="{loc:Tr Key=identity.create}" Command="{Binding AttachIdentity}"
+                        Padding="12,6" IsVisible="{Binding !IdentityAttached}" />
+                <Button Content="{loc:Tr Key=identity.reveal}" Command="{Binding RevealIdentity}"
+                        Padding="12,6" IsVisible="{Binding IdentityAttached}" />
+              </StackPanel>
             </StackPanel>
           </Border>
 
@@ -224,7 +251,9 @@
             <Button Content="{loc:Tr Key=action.abort}" Command="{Binding AbortMission}" Padding="14,10" Margin="0,0,8,8" />
           </WrapPanel>
 
-          <TextBlock Text="{Binding MissionSummary}" Classes="hint" Margin="0,0,0,10" />
+          <TextBlock Text="{Binding MissionSummary}" Classes="hint" Margin="0,0,0,2" />
+          <TextBlock Text="{Binding RelayHistory}" Classes="hint" Margin="0,0,0,10"
+                     IsVisible="{Binding RelayHistory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
           <TextBlock Text="{loc:Tr Key=ledger.title}" Classes="section" />
           <TextBlock Text="{loc:Tr Key=ledger.hint}" Classes="hint" Margin="0,0,0,6" />
