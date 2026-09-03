@@ -1050,6 +1050,19 @@ public sealed class BridgeServer : IAsyncDisposable
 
         engine.Resume();
 
+        // ⚠️ Resuming has to make it the ACTIVE mission, and forgetting this makes the whole
+        // command useless in a way that reads as a different bug. `resume` answered
+        // `resumed: true` with the mission id, and then the agent's very next call — `attempt`,
+        // `gate`, `continue`, none of which name a mission — got "no such mission, and no active
+        // mission to fall back to". So the agent believes it resumed, and every following call
+        // says the mission does not exist.
+        //
+        // Third time this exact shape has appeared here: a mission is brought into the host by
+        // something other than the operator clicking, and nothing selects it. See the note on
+        // missions opened through the bridge not appearing selected in the window.
+        _host.SetActiveMission(engine.Mission.Id);
+        WriteHandshake();
+
         var openButtons = _host.Buttons.Count(b => b.IsOpen && b.MissionId == engine.Mission.Id);
 
         Logged?.Invoke(

@@ -1,3 +1,4 @@
+using RolloutLoud.Core;
 using RolloutLoud.Core.Buttons;
 using RolloutLoud.Core.Missions;
 using RolloutLoud.Core.Workspace;
@@ -182,5 +183,61 @@ public sealed class ResumeTests : IDisposable
         };
 
         Assert.False(mission.IsTerminal);
+    }
+
+    [Fact]
+    public void Resuming_a_mission_makes_it_the_active_one()
+    {
+        // ⚠️ Found by actually resuming, not by reading the handler. Without this the command
+        // answers `resumed: true` with the mission id, and then the agent's very next call —
+        // `attempt`, `gate`, `continue`, none of which name a mission — gets "no such mission, and
+        // no active mission to fall back to". The agent believes it resumed and everything after
+        // says the mission does not exist, which reads as a completely different bug.
+        //
+        // Third occurrence of this shape here: a mission enters the host by some route other than
+        // the operator clicking, and nothing selects it. See the note about a mission opened
+        // through the bridge not appearing selected in the window.
+        using var host = new HostFixture(_paths);
+
+        var first = host.Open("the one the operator was on");
+        var resumed = host.Open("the one being picked back up");
+
+        host.Value.SetActiveMission(first.Mission.Id);
+        Assert.Equal(first.Mission.Id, host.Value.ActiveMissionId);
+
+        host.Value.SetActiveMission(resumed.Mission.Id);
+
+        Assert.Equal(resumed.Mission.Id, host.Value.ActiveMissionId);
+        Assert.Same(resumed, host.Value.FindMission(null));
+    }
+
+    /// <summary>A host on a throwaway repository, so the test needs nothing installed.</summary>
+    private sealed class HostFixture(RolloutPaths paths) : IDisposable
+    {
+        public RolloutHost Value { get; } = new(paths, new NoElevation());
+
+        public MissionEngine Open(string objective) => Value.CreateMission(new Mission
+        {
+            Id = Mission.NewId(),
+            Objective = objective,
+            AgentId = "claude",
+            State = MissionState.Running,
+        });
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class NoElevation : RolloutLoud.Core.Elevation.IElevationService
+        {
+            public bool IsElevated => false;
+
+            public bool CanElevate => false;
+
+            public string PromptDescription => "not in a test";
+
+            public Task<bool> RelaunchElevatedAsync(string root, CancellationToken token = default) =>
+                Task.FromResult(false);
+        }
     }
 }

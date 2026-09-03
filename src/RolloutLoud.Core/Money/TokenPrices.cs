@@ -102,6 +102,31 @@ public sealed class TokenPrices
             CacheWritePerMillion = 3.75m,
             CacheReadPerMillion = 0.30m,
         },
+
+        // Codex, whose transcripts name the model as gpt-5.5, gpt-5.4-mini, gpt-5.3-codex and so
+        // on. Prefix matching means the family entry covers each point release, which is what stops
+        // the table going blind the week a new one ships.
+        //
+        // ⚠️ Codex has no cache WRITE charge in its accounting — the session file reports input,
+        // cached input and output, and nothing else. The write rate is set equal to input rather
+        // than to zero, so that if a future version starts reporting one it is priced sanely rather
+        // than silently free.
+        new ModelPrice
+        {
+            Model = "gpt-5*-mini",
+            InputPerMillion = 0.25m,
+            OutputPerMillion = 2.00m,
+            CacheWritePerMillion = 0.25m,
+            CacheReadPerMillion = 0.025m,
+        },
+        new ModelPrice
+        {
+            Model = "gpt-5*",
+            InputPerMillion = 1.25m,
+            OutputPerMillion = 10.00m,
+            CacheWritePerMillion = 1.25m,
+            CacheReadPerMillion = 0.125m,
+        },
     ];
 
     public static TokenPrices Default { get; } = new(Defaults);
@@ -109,9 +134,10 @@ public sealed class TokenPrices
     private readonly IReadOnlyList<ModelPrice> _prices;
 
     public TokenPrices(IEnumerable<ModelPrice> prices) =>
-        // Longest prefix first, so "claude-opus-4-5" beats "claude-opus" when both are listed and
-        // the operator has priced one build differently from its family.
-        _prices = [.. prices.OrderByDescending(p => p.Model.Length)];
+        // Most specific first, measured in LITERAL characters rather than raw length, so
+        // "gpt-5*-mini" (ten literal) beats "gpt-5*" (five) and a wildcard cannot buy specificity
+        // by being long.
+        _prices = [.. prices.OrderByDescending(p => p.Model.Count(c => c != '*'))];
 
     public IReadOnlyList<ModelPrice> All => _prices;
 
@@ -119,7 +145,59 @@ public sealed class TokenPrices
     public ModelPrice? For(string? model) =>
         string.IsNullOrWhiteSpace(model)
             ? null
-            : _prices.FirstOrDefault(p => model.StartsWith(p.Model, StringComparison.OrdinalIgnoreCase));
+            : _prices.FirstOrDefault(p => Matches(model, p.Model));
+
+    /// <summary>
+    /// Whether a model id is covered by a price key.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ A plain prefix is an <b>Anthropic-shaped</b> rule, and applying it to Codex misprices
+    /// silently. Anthropic puts the family first — <c>claude-opus-4-5-20260514</c> — so
+    /// <c>claude-opus</c> covers every build. OpenAI puts the version in the middle and the variant
+    /// at the <b>end</b>: the real ids here are <c>gpt-5.5</c>, <c>gpt-5.4-mini</c>,
+    /// <c>gpt-5.1-codex-max</c>. A key of <c>gpt-5-mini</c> never matches <c>gpt-5.4-mini</c>, while
+    /// <c>gpt-5</c> matches it happily — and a mini billed as a full model is around five times too
+    /// dear, with nothing anywhere reporting a problem.
+    ///
+    /// So a key may carry <c>*</c>. A key without one still behaves exactly as a prefix, which is
+    /// what every entry written before this did, so no existing pricing.json changes meaning.
+    /// </remarks>
+    private static bool Matches(string model, string pattern)
+    {
+        if (!pattern.Contains('*', StringComparison.Ordinal))
+        {
+            return model.StartsWith(pattern, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var segments = pattern.Split('*');
+        var at = 0;
+
+        for (var i = 0; i < segments.Length; i++)
+        {
+            var segment = segments[i];
+
+            if (segment.Length == 0)
+            {
+                continue;
+            }
+
+            // The first segment is anchored; the rest may appear anywhere after what came before.
+            // A trailing segment is not anchored to the end, so "gpt-5*-mini" still covers a dated
+            // build like "gpt-5.4-mini-20260714".
+            var found = i == 0
+                ? model.StartsWith(segment, StringComparison.OrdinalIgnoreCase) ? 0 : -1
+                : model.IndexOf(segment, at, StringComparison.OrdinalIgnoreCase);
+
+            if (found < 0)
+            {
+                return false;
+            }
+
+            at = found + segment.Length;
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Loads the operator's price list, falling back to the shipped one.

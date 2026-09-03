@@ -32,7 +32,7 @@ public sealed class ContextMeter
     private readonly List<IContextProbe> _probes;
 
     public ContextMeter(IEnumerable<IContextProbe>? probes = null) =>
-        _probes = [.. probes ?? [new ClaudeCodeProbe()]];
+        _probes = [.. probes ?? [new ClaudeCodeProbe(), new CodexContextProbe()]];
 
     /// <summary>
     /// Characters RolloutLoud has put into an agent's context, per agent.

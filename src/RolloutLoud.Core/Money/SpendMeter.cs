@@ -41,7 +41,7 @@ public sealed class SpendMeter
     public SpendMeter(Func<TokenPrices>? prices = null, IEnumerable<ISpendProbe>? probes = null)
     {
         _prices = prices ?? (() => TokenPrices.Default);
-        _probes = [.. probes ?? [new ClaudeCodeSpendProbe()]];
+        _probes = [.. probes ?? [new ClaudeCodeSpendProbe(), new CodexSpendProbe()]];
     }
 
     /// <summary>
