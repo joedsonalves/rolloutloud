@@ -1,4 +1,4 @@
-<#
+﻿<#
     Generates assets/rolloutloud.ico and assets/rolloutloud-256.png.
 
     The mark is three chevrons climbing to the right, stepping cyan -> blue -> indigo. That is

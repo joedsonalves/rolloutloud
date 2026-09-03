@@ -1,5 +1,11 @@
 * text=auto eol=lf
 *.sh text eol=lf
+
+# PowerShell scripts are UTF-8 WITH BOM and CRLF, and both halves matter. Windows PowerShell 5.1
+# reads a BOM-less UTF-8 file as ANSI, so one em dash in a comment becomes two garbage bytes and
+# the parse fails on an unrelated line twelve lines away.
+*.ps1 text eol=crlf
+*.yaml text eol=crlf
 *.cs text diff=csharp
 *.axaml text
 *.csproj text
