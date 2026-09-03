@@ -260,7 +260,28 @@ public sealed class MainViewModel : Observable
     /// explained, and its value is mostly to somebody who changes their OS theme during the day.
     /// ROLLOUTLOUD_THEME=system still reaches it for a contrast check.
     /// </remarks>
-    public string ThemeGlyph => _theme == ThemeChoice.Dark ? "☀" : "☽";
+    /// <summary>
+    /// Vector geometry rather than a text glyph.
+    /// </summary>
+    /// <remarks>
+    /// ☀ and ☽ were the obvious first choice and the moon was nearly invisible: the two codepoints
+    /// come from different fonts in the fallback chain and are drawn at different weights, so the
+    /// sun read as an icon and the moon as a hairline. Drawing both as paths makes them one
+    /// family, and takes the font stack out of the question entirely.
+    /// </remarks>
+    public string ThemeGeometry => _theme == ThemeChoice.Dark ? SunGeometry : MoonGeometry;
+
+    private const string SunGeometry =
+        "M12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7Z " +
+        "M11,1H13V4.5H11V1Z M11,19.5H13V23H11V19.5Z M1,11H4.5V13H1V11Z M19.5,11H23V13H19.5V11Z " +
+        "M4.22,5.64L5.64,4.22L8.11,6.69L6.69,8.11L4.22,5.64Z " +
+        "M15.89,17.31L17.31,15.89L19.78,18.36L18.36,19.78L15.89,17.31Z " +
+        "M18.36,4.22L19.78,5.64L17.31,8.11L15.89,6.69L18.36,4.22Z " +
+        "M5.64,19.78L4.22,18.36L6.69,15.89L8.11,17.31L5.64,19.78Z";
+
+    private const string MoonGeometry =
+        "M12.5,2A9.5,9.5 0 0,0 12.5,21C15,21 17.26,20.03 18.94,18.45C14.2,18.2 10.5,14.5 " +
+        "10.5,10A8.5,8.5 0 0,1 15.4,2.28C14.47,2.1 13.5,2 12.5,2Z";
 
     public string ThemeTooltip =>
         Localizer.Current[_theme == ThemeChoice.Dark ? "theme.toLight" : "theme.toDark"];
@@ -272,7 +293,7 @@ public sealed class MainViewModel : Observable
         _theme = _theme == ThemeChoice.Dark ? ThemeChoice.Light : ThemeChoice.Dark;
         AvaloniaApp.SetTheme(_theme);
 
-        Raise(nameof(ThemeGlyph));
+        Raise(nameof(ThemeGeometry));
         Raise(nameof(ThemeTooltip));
         Log($"Theme: {_theme}. Remembered in {UiPreferences.FilePath}");
         return Task.CompletedTask;

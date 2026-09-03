@@ -28,9 +28,14 @@
             <TextBlock Text="{Binding ElevationBadge}" FontSize="12" FontWeight="Bold" HorizontalAlignment="Right" />
             <TextBlock Text="{Binding ElevationDetail}" Classes="hint" MaxWidth="380" TextAlignment="Right" />
           </StackPanel>
-          <Button Content="{Binding ThemeGlyph}" Command="{Binding ToggleTheme}"
-                  ToolTip.Tip="{Binding ThemeTooltip}"
-                  FontSize="17" Padding="12,4" MinWidth="44" VerticalAlignment="Center" />
+          <Button Command="{Binding ToggleTheme}" ToolTip.Tip="{Binding ThemeTooltip}"
+                  Padding="11,7" VerticalAlignment="Center">
+            <!-- A path, not a text glyph: ☀ and ☽ resolve to different fonts in the fallback
+                 chain and are drawn at different weights, so the moon came out as a hairline
+                 next to a solid sun. -->
+            <PathIcon Data="{Binding ThemeGeometry}" Width="18" Height="18"
+                      Foreground="{DynamicResource RlText}" />
+          </Button>
           <Button Content="{loc:Tr Key=app.elevate}" Command="{Binding Elevate}" Padding="14,8"
                   IsVisible="{Binding !IsElevated}" />
         </StackPanel>
