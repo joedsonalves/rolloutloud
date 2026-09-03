@@ -113,8 +113,8 @@ Description: |-
   stop producing new information. A watchdog restarts an agent that stops early, with the
   ledger attached. Subagent offload keeps the cost per action from climbing with the hour.
 
-  For engagement work the mission carries a scope that is enforced on every command the agent
-  declares, with the authorisation recorded alongside it.
+  When a mission will touch something outside the machine, it can carry a boundary that is
+  enforced on every command the agent declares, with the approval recorded alongside it.
 
   Interface in English, Portuguese and Spanish, following the system language, in light and
   dark themes.
@@ -158,8 +158,8 @@ Description: |-
   reinicia o agente que para cedo, com o livro-razao junto. A descarga para subagentes impede
   o custo por acao de subir com a hora.
 
-  Para trabalho com escopo, a missao carrega alvos que sao verificados em todo comando que o
-  agente declara, com a autorizacao registrada ao lado.
+  Quando uma missao vai tocar algo fora da maquina, ela pode carregar uma fronteira verificada
+  em todo comando que o agente declara, com a aprovacao registrada ao lado.
 
   Interface em ingles, portugues e espanhol, seguindo o idioma do sistema, em tema claro e escuro.
 ManifestType: locale
@@ -191,8 +191,8 @@ Description: |-
   detiene pronto, con el registro adjunto. La descarga a subagentes evita que el coste por
   accion suba con las horas.
 
-  Para trabajo con alcance definido, la mision lleva objetivos que se verifican en cada comando
-  que el agente declara, con la autorizacion registrada al lado.
+  Cuando una mision va a tocar algo fuera de la maquina, puede llevar una frontera verificada en
+  cada comando que el agente declara, con la aprobacion registrada al lado.
 
   Interfaz en ingles, portugues y espanol, siguiendo el idioma del sistema, en tema claro y oscuro.
 ManifestType: locale

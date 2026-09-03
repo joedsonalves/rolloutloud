@@ -10,9 +10,9 @@ Cross-platform (Windows, macOS, Linux) · .NET 10 · Avalonia
 
 ## The problem
 
-Ask a CLI agent to "attack within scope until you land a critical" and it tries three things,
-the third fails, and it comes back with *"I was unable to find a critical vulnerability. Let me
-know if you'd like me to try another approach."*
+Ask a CLI agent to "make the integration suite pass on Windows, not just on my machine" and it
+tries three things, the third fails, and it comes back with *"I was unable to get the suite
+green. Let me know if you'd like me to try another approach."*
 
 That is not a capability problem. It is a question of **who decides it is finished** — and there
 are four separate reasons behind it:
@@ -34,8 +34,8 @@ the scope" is a request rather than a rule (**scope enforced before every comman
 A mission carries a `SuccessGate` — a command whose exit code ends the run. The agent cannot
 declare victory; it produces evidence and asks the gate. And a satisfied gate is **run a second
 time, from a clean process**, before it is believed: an agent that has been grinding for two
-hours writes a confident summary of a critical it did not find, and that summary reads exactly
-like a real one.
+hours writes a confident summary of a fix that does not hold, and that summary reads exactly like
+a real one.
 
 ---
 
@@ -80,8 +80,8 @@ These four are **data, not code**: defaults live in `AgentCatalog`, overrides in
 not a release.
 
 **A mission box.** Write the outcome you want, not the steps. It carries the objective, the
-success gate, the engagement scope with its authorisation, the stop conditions, and the offload
-switch.
+success gate, an optional boundary with the approval behind it, the stop conditions, and the
+offload switch.
 
 **Fluid buttons.** A panel where commands requested by agents appear.
 
@@ -132,13 +132,18 @@ It is re-read from disk on every check, so adding a pattern mid-run takes effect
 
 ## Scope
 
-For engagement work, the mission carries the boundary, and it is **enforced on every command the
-agent declares** — not advice in a prompt that competes with two hours of frustration.
+Most missions are local work and need no boundary at all — leave it blank. It exists for the case
+where an agent is pointed at something outside the machine, and the boundary has to hold: a
+staging environment that must not leak into production, a migration that may touch one database
+and not the one beside it, a deployment allowed one cluster and no others.
+
+There the mission carries the boundary, and it is **enforced on every command the agent
+declares** — not advice in a prompt that competes with two hours of frustration.
 
 ```
-in scope:  app.example.com, 10.0.4.0/24
+in scope:  app.staging.example.com, 10.0.4.0/24
 excluded:  payments.example.com
-authorised by: engagement REF-2026-114, signed by the client CISO
+approved by: change CHG-2026-114, signed off by the platform team
 ```
 
 Out-of-scope commands are refused before they run, and the refusal goes into the ledger with its
@@ -146,8 +151,8 @@ reason, so the agent learns the edge instead of hammering it.
 
 > ⚠️ **This is a guard rail, not a sandbox.** It reads the command the agent *declared*. An agent
 > running unsupervised in an elevated terminal can always reach past it. It exists to stop honest
-> drift — and that is why authorisation is required whenever targets are declared: the run has to
-> be attributable afterwards.
+> drift — and that is why an approval note is required whenever targets are declared: the run has
+> to be attributable afterwards.
 
 ---
 
@@ -176,14 +181,14 @@ instruction file.
 ```bash
 curl -X POST "$ROLLOUTLOUD_BRIDGE/v1/missions/active/admit" \
      -H "X-RolloutLoud-Token: $ROLLOUTLOUD_TOKEN" -d '{
-       "hypothesis": "The login form concatenates the username into SQL",
-       "command": "sqlmap -u https://app.example.com/login --batch"
+       "hypothesis": "The suite fails on Windows because the fixture writes LF line endings",
+       "command": "dotnet test tests/Integration --filter Category=Fixtures"
      }'
 ```
 
 Bound to `127.0.0.1` only, and still token-authenticated: the loopback bind keeps it off the
-network, and the token keeps it away from every other process on the machine — which on a pentest
-box is not a hypothetical population.
+network, and the token keeps it away from every other process on the machine, which on a
+developer's box is not a small population.
 
 Full contract: **[docs/BRIDGE.md](docs/BRIDGE.md)**.
 
@@ -195,6 +200,7 @@ Full contract: **[docs/BRIDGE.md](docs/BRIDGE.md)**.
 ## The `rollout` CLI
 
 ```
+rollout attach [--mission "<objective>"]   find it, or start it, then print the bridge details
 rollout install [--no-open]      build and open, anchored here
 rollout open [--elevated]
 rollout status
@@ -208,7 +214,14 @@ rollout gate
 
 rollout button --title "<label>" --command "<cmd>" [--elevated] [--detached]
 rollout invoke <button-id>
+
+rollout finish "<what was achieved>"       ask to close — refused unless the gate passed
 ```
+
+`rollout attach` is the one an agent runs at the start of a session. It answers "is it installed,
+is it running, do I need to start it, has it finished starting" in one idempotent command, and
+always ends with the same JSON on stdout. Running it twice focuses the existing window rather than
+starting a rival.
 
 ---
 
@@ -237,15 +250,37 @@ bridge token, the allowlist. It is git-ignored: it carries a live credential and
 
 ---
 
+## Closing when the work is done
+
+An agent can ask to close the window with `rollout finish`. The request is judged on the mission's
+state, never on what the agent says — so *"I could not do it"* arrives as `Exhausted` and is turned
+down with that named back at it. Running out of budget is not completing the objective.
+
+When it is genuinely achieved, a **Close RolloutLoud** button appears for you. Tick *let it close
+the window itself* and the agent can do it unattended: the gate decides whether the work is done,
+that checkbox decides whether you want the window gone as a result, and the second question is
+yours.
+
+## Several agents at once
+
+One RolloutLoud per repository — starting a second in the same folder focuses the first instead,
+because two would fight over `.rolloutloud/bridge.json` and strand every agent holding the old
+token.
+
+Within that one window, **several agents work at once, one mission each.** The open-missions list
+at the top of the mission panel switches which one `active` resolves to for an agent that calls the
+bridge without naming one. For genuinely separate work, run RolloutLoud in a second folder — the
+repository is the anchor, so that is a second instance with its own port and its own missions.
+
 ## What it does not do
 
 - **It does not bypass UAC or its equivalent.** A UAC bypass is a security-control evasion
   technique, it breaks with every patch, and it would get RolloutLoud itself flagged by EDR on
   exactly the machine where it needs to run. The broker delivers the same practical result with
   one prompt.
-- **It does not verify your authorisation.** It requires you to write down who authorised the
-  engagement, and warns in amber when that field is empty. It cannot check that the engagement
-  exists.
+- **It does not verify your approval.** When you declare targets it requires you to write down who
+  approved touching them, and warns in amber when that field is empty. It cannot check that the
+  approval is real.
 - **It does not send anything anywhere.** No telemetry, no service, no account.
 
 ## Licence
