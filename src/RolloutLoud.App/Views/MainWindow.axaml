@@ -85,6 +85,51 @@
       <!-- ================= Centre: the mission ================= -->
       <ScrollViewer Grid.Column="1" Margin="0,0,12,0">
         <StackPanel>
+          <!-- A mission an agent wrote, waiting on the operator.
+               Above everything, because an agent is blocked behind it — and the gate is directly
+               under the objective because that is the field the operator has never seen and the
+               one that decides the run is over. -->
+          <ContentControl Content="{Binding PendingProposal}" IsVisible="{Binding HasPendingProposal}">
+            <ContentControl.ContentTemplate>
+              <DataTemplate x:DataType="vm:ProposalCard">
+                <Border Classes="card" BorderBrush="{DynamicResource RlAccent}" BorderThickness="2">
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="{loc:Tr Key=proposal.title}" Classes="section" Margin="0" />
+                    <TextBlock Text="{Binding Header}" Classes="hint" />
+
+                    <TextBlock Text="{loc:Tr Key=proposal.objective}" FontWeight="SemiBold" FontSize="12" Margin="0,4,0,0" />
+                    <TextBox Text="{Binding Objective}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" />
+
+                    <TextBlock Text="{loc:Tr Key=proposal.gate}" FontWeight="SemiBold" FontSize="12" Margin="0,4,0,0" />
+                    <TextBox Text="{Binding GateCommand}" FontFamily="Consolas,Menlo,monospace" FontSize="11"
+                             PlaceholderText="{loc:Tr Key=proposal.gate.none}" />
+
+                    <TextBlock Text="{loc:Tr Key=proposal.review.title}" FontWeight="SemiBold" FontSize="12" Margin="0,4,0,0" />
+                    <Border Background="{DynamicResource RlSurfaceSunken}" CornerRadius="4" Padding="8">
+                      <TextBlock Text="{Binding ReviewLine}" FontSize="11" TextWrapping="Wrap" />
+                    </Border>
+
+                    <StackPanel Spacing="4" IsVisible="{Binding HasRationale}">
+                      <TextBlock Text="{loc:Tr Key=proposal.rationale}" FontWeight="SemiBold" FontSize="12" Margin="0,4,0,0" />
+                      <TextBlock Text="{Binding Rationale}" Classes="hint" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <TextBlock Text="{loc:Tr Key=proposal.scope}" FontWeight="SemiBold" FontSize="12" Margin="0,4,0,0" />
+                    <TextBlock Text="{Binding ScopeLine}" Classes="hint" TextWrapping="Wrap" />
+
+                    <TextBlock Text="{loc:Tr Key=proposal.edit.hint}" Classes="hint" Margin="0,4,0,0" />
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button Content="{loc:Tr Key=proposal.accept}" Command="{Binding Accept}"
+                              Padding="18,8" FontWeight="SemiBold" />
+                      <Button Content="{loc:Tr Key=proposal.discard}" Command="{Binding Discard}" Padding="18,8" />
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ContentControl.ContentTemplate>
+          </ContentControl>
+
           <TextBlock Text="{loc:Tr Key=mission.title}" Classes="section" />
 
           <!-- Several agents work in this window at once, one mission each. Which row is selected

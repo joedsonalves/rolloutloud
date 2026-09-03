@@ -59,6 +59,51 @@ there.
 
 ---
 
+## Letting the agent write the mission
+
+You are already in a CLI. Rather than switching to the window and typing the objective, the gate
+and the scope yourself, tell the agent what you want and let it compose the mission — it knows the
+repository, and it knows which command actually proves the thing.
+
+> *"Open RolloutLoud and set up a mission to make the checkout flake reproducible, then fix it."*
+
+```
+rollout propose "make the intermittent checkout failure reproducible, then fix it" \
+        --gate "dotnet test tests/Checkout -c Release" \
+        --why  "that suite is the one that flakes, and it fails cleanly while the bug is present"
+```
+
+RolloutLoud opens if it is shut, the proposal appears in the window, and the agent **waits**.
+
+### Why it waits
+
+Composing a mission means composing its **success gate**, and a gate the agent wrote for itself is
+not a gate — it is the agent's own opinion of "done", wearing a command's clothes. Letting it
+install that unread hands back the one decision this whole tool exists to take away.
+
+So the proposal is a draft. You get the objective and the gate side by side, both editable, and
+underneath them RolloutLoud's reading of the gate:
+
+| the agent proposed | what you are told |
+| --------------------------------- | ------------------------------------------------------- |
+| `dotnet test \|\| true` | the shell reports the last command; this cannot fail |
+| `test -f REPORT.md` | writing a file is the one thing the agent can always do |
+| `grep -q CRITICAL findings.json` | the same, with a coat of diligence on |
+| anything under `.rolloutloud/` | the agent wrote those records; the gate would ask it |
+| `claude -p "is this good?"` | a model's opinion, which is what the gate replaces |
+| `dotnet test tests/Checkout` | nothing to flag — it re-derives the result |
+
+Fix the gate in the box and press **Start mission**; what runs is what you left there. The agent
+gets the briefing back on the same call it was blocked on, and starts work. **Discard** sends the
+reason back instead, so it can re-propose against the thing that was actually wrong.
+
+**It marks, it never refuses.** A gate that looks self-certifying is sometimes exactly right — a
+scanner really does write its output to a file — and RolloutLoud cannot know which. What it can do
+is make sure your eye lands on the gate before it becomes the finish line. Same reason the warning
+also appears on `rollout mission`, where it is already too late to stop anything.
+
+---
+
 ## What the window gives you
 
 **Four CLIs, two buttons each.** Normal, and elevated — the red one, which turns the CLI's
@@ -222,6 +267,7 @@ rollout open [--elevated]
 rollout status
 
 rollout mission "<objective>" --gate "<command>" --scope a,b --auth "<who authorised it>"
+rollout propose "<objective>" --gate "<command>" --why "<reasoning>"   you approve it before it runs
 rollout briefing ["<subagent task>"]
 rollout admit    "<hypothesis>" "<command>"
 rollout attempt  "<hypothesis>" "<command>" --outcome failed --learned "…"

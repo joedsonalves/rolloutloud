@@ -132,6 +132,117 @@ public sealed class MissionSummaryItem(RolloutLoud.Core.Missions.MissionEngine e
     }
 }
 
+/// <summary>
+/// A mission an agent composed, shown to the operator with its gate pulled to the front.
+/// </summary>
+/// <remarks>
+/// The layout is an argument. The objective is what the operator asked for and will skim; the
+/// <b>gate</b> is the thing they have never seen and the thing that will end the run, so it sits
+/// directly under the objective with RolloutLoud's opinion of it attached — not folded away under
+/// "advanced".
+///
+/// Both fields are editable, and that is the cheap half of the feature. "This gate checks a file
+/// you write" is a useful thing to be told and a useless one to be told if fixing it means
+/// discarding, going back to the terminal, and asking the agent to try again.
+///
+/// ⚠️ Every string here came from a model. It is shown, quoted, and never acted on — the same rule
+/// the ledger follows. Accepting is the operator adopting the sentence as their own, which is
+/// exactly what makes the objective safe to put in a briefing afterwards.
+/// </remarks>
+public sealed class ProposalCard : Observable
+{
+    private readonly MissionProposal _proposal;
+    private string _objective;
+    private string _gateCommand;
+
+    public ProposalCard(MissionProposal proposal, MainViewModel owner)
+    {
+        _proposal = proposal;
+        _objective = proposal.Objective;
+        _gateCommand = proposal.GateCommand ?? string.Empty;
+
+        Accept = new RelayCommand(_ => owner.AcceptProposal(this));
+        Discard = new RelayCommand(_ => owner.DiscardProposal(this));
+    }
+
+    public string Id => _proposal.Id;
+
+    public string ProposedBy => _proposal.ProposedBy;
+
+    public string Objective
+    {
+        get => _objective;
+        set => Set(ref _objective, value);
+    }
+
+    public string GateCommand
+    {
+        get => _gateCommand;
+        set
+        {
+            Set(ref _gateCommand, value);
+            GateEdited();
+        }
+    }
+
+    public string Header => Localizer.Current.Format("proposal.hint", _proposal.ProposedBy);
+
+    public string? Rationale => _proposal.Rationale;
+
+    public bool HasRationale => !string.IsNullOrWhiteSpace(_proposal.Rationale);
+
+    public string ScopeLine => _proposal.Scope.Count == 0
+        ? Localizer.Current["proposal.scope.none"]
+        : string.Join(", ", _proposal.Scope) +
+          (_proposal.NeedsAuthorization ? "  ⚠ no authorisation recorded" : $"  · {_proposal.Authorization}");
+
+    /// <summary>
+    /// What RolloutLoud thinks of the gate, worst finding first.
+    /// </summary>
+    /// <remarks>
+    /// Recomputed from the edited box rather than read off the proposal, so a gate the operator
+    /// has just fixed stops being warned about while they are still looking at it. A critique that
+    /// went stale the moment it was acted on would train them to ignore the next one.
+    /// </remarks>
+    public string ReviewLine
+    {
+        get
+        {
+            var gate = string.IsNullOrWhiteSpace(GateCommand)
+                ? SuccessGate.OperatorJudged
+                : new SuccessGate { Kind = GateKind.Command, Command = GateCommand };
+
+            var review = GateCritique.Review(gate);
+
+            return review.Findings.Count == 0
+                ? Localizer.Current["proposal.review.clean"]
+                : string.Join("\n\n", review.Findings.Select(f =>
+                    (f.Concern == GateConcern.Serious ? "⚠ " : "· ") + f.Detail));
+        }
+    }
+
+    public bool ReviewIsSerious =>
+        !string.IsNullOrWhiteSpace(GateCommand) &&
+        GateCritique.Review(new SuccessGate { Kind = GateKind.Command, Command = GateCommand }).HasSeriousFinding;
+
+    public RelayCommand Accept { get; }
+
+    public RelayCommand Discard { get; }
+
+    /// <summary>The proposal as the operator left it, ready to become a mission.</summary>
+    public MissionProposal Edited => _proposal with
+    {
+        Objective = Objective,
+        GateCommand = string.IsNullOrWhiteSpace(GateCommand) ? null : GateCommand,
+    };
+
+    internal void GateEdited()
+    {
+        Raise(nameof(ReviewLine));
+        Raise(nameof(ReviewIsSerious));
+    }
+}
+
 public sealed class MainViewModel : Observable
 {
     private readonly RolloutHost _host;
@@ -160,6 +271,7 @@ public sealed class MainViewModel : Observable
     private bool _relayBetweenAgents = true;
     private string _selectedAgentId = AgentCatalog.Claude;
     private MissionEngine? _mission;
+    private ProposalCard? _pendingProposal;
 
     public MainViewModel(RolloutHost host, BridgeServer bridge)
     {
@@ -197,6 +309,14 @@ public sealed class MainViewModel : Observable
             });
         });
         bridge.Logged += message => Dispatcher.UIThread.Post(() => Log(message));
+
+        // The agent is blocked on this, so it gets its own line rather than arriving only as a
+        // card the operator may be scrolled away from.
+        host.ProposalArrived += p => Dispatcher.UIThread.Post(() =>
+        {
+            SyncProposal();
+            Log(Localizer.Current.Format("proposal.arrived", p.ProposedBy, p.Objective));
+        });
         RelayCommand.Failed += ex => Dispatcher.UIThread.Post(() => Log("Error: " + ex.Message));
 
         _supervisor.Logged += e => Dispatcher.UIThread.Post(() =>
@@ -218,6 +338,26 @@ public sealed class MainViewModel : Observable
     }
 
     public ObservableCollection<AgentLauncher> Agents { get; }
+
+    /// <summary>
+    /// The mission an agent is waiting for an answer on, or null when nothing is on the desk.
+    /// </summary>
+    /// <remarks>
+    /// One at a time, oldest first, rather than a list. A proposal is a question with an agent
+    /// blocked behind it, and stacking four of them turns a decision into a triage queue — which is
+    /// how the one with the bad gate gets approved along with the rest.
+    /// </remarks>
+    public ProposalCard? PendingProposal
+    {
+        get => _pendingProposal;
+        private set
+        {
+            Set(ref _pendingProposal, value);
+            Raise(nameof(HasPendingProposal));
+        }
+    }
+
+    public bool HasPendingProposal => _pendingProposal is not null;
 
     public ObservableCollection<ButtonCard> Buttons { get; } = [];
 
@@ -884,10 +1024,64 @@ public sealed class MainViewModel : Observable
     {
         SyncButtons();
         SyncMissions();
+        SyncProposal();
         RefreshMission();
         RefreshIdentity();
         Raise(nameof(DiskSummary));
     });
+
+    /// <summary>
+    /// Puts the oldest waiting proposal on screen, and keeps it there while it is being edited.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Rebuilding the card whenever the host changes would throw away the operator's half-typed
+    /// gate on the next unrelated event — a fluid button arriving, an attempt landing, the disk
+    /// summary ticking. The identity check is what makes the card survive everything that is not
+    /// about it.
+    /// </remarks>
+    private void SyncProposal()
+    {
+        var pending = _host.PendingProposal;
+
+        if (pending is null)
+        {
+            PendingProposal = null;
+            return;
+        }
+
+        if (PendingProposal?.Id == pending.Id)
+        {
+            return;
+        }
+
+        PendingProposal = new ProposalCard(pending, this);
+    }
+
+    /// <summary>The operator saying yes. What runs is the card as they left it, not as it arrived.</summary>
+    internal void AcceptProposal(ProposalCard card)
+    {
+        var engine = _host.AcceptProposal(card.Id, card.Edited);
+        if (engine is null)
+        {
+            return;
+        }
+
+        Log(Localizer.Current.Format("proposal.started", engine.Mission.Id, card.ProposedBy));
+        SelectedMission = OpenMissions.FirstOrDefault(m => m.Id == engine.Mission.Id);
+    }
+
+    internal void DiscardProposal(ProposalCard card)
+    {
+        // The reason the agent gets back names the gate when that is what was wrong with it,
+        // because "discarded" alone gives it nothing to fix and it will re-propose the same thing.
+        _host.RejectProposal(
+            card.Id,
+            card.ReviewIsSerious
+                ? "The operator discarded this. The gate does not test the objective: " + card.ReviewLine
+                : null);
+
+        Log(Localizer.Current.Format("proposal.discarded", card.ProposedBy));
+    }
 
     private void SyncMissions()
     {

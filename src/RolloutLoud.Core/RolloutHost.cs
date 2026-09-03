@@ -24,6 +24,7 @@ public sealed class RolloutHost
     private readonly Lock _gate = new();
     private readonly Dictionary<string, MissionEngine> _engines = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FluidButton> _buttons = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, MissionProposal> _proposals = new(StringComparer.Ordinal);
     private ButtonAllowlist _allowlist = ButtonAllowlist.Empty;
     private DateTime _allowlistStamp = DateTime.MinValue;
     private IReadOnlyList<AgentDescriptor> _agents = AgentCatalog.Defaults;
@@ -389,6 +390,142 @@ public sealed class RolloutHost
         StateChanged?.Invoke();
         return engine;
     }
+
+    /// <summary>Mission drafts an agent has written and the operator has not answered yet.</summary>
+    public IReadOnlyList<MissionProposal> Proposals
+    {
+        get { lock (_gate) { return [.. _proposals.Values.OrderByDescending(p => p.CreatedAt)]; } }
+    }
+
+    /// <summary>The one the window should be showing. Oldest pending, so a queue drains in order.</summary>
+    public MissionProposal? PendingProposal
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _proposals.Values
+                    .Where(p => p.IsPending)
+                    .OrderBy(p => p.CreatedAt)
+                    .FirstOrDefault();
+            }
+        }
+    }
+
+    public MissionProposal? FindProposal(string id)
+    {
+        lock (_gate) { return _proposals.GetValueOrDefault(id); }
+    }
+
+    /// <summary>
+    /// Takes a mission an agent composed and puts it in front of the operator.
+    /// </summary>
+    /// <remarks>
+    /// It deliberately does not start anything. See <see cref="MissionProposal"/> for why: the
+    /// agent authoring its own success gate is the agent deciding it is done, one step removed.
+    ///
+    /// A new proposal withdraws that agent's previous pending one rather than queueing behind it.
+    /// An agent revises — it proposes, reads the critique, proposes better — and leaving both on
+    /// the desk would make the operator choose between two drafts of the same idea, where the only
+    /// answer that could be right is the newer one.
+    /// </remarks>
+    public MissionProposal Propose(MissionProposal proposal)
+    {
+        var reviewed = proposal with { Review = GateCritique.Review(proposal.Gate) };
+
+        lock (_gate)
+        {
+            foreach (var stale in _proposals.Values
+                         .Where(p => p.IsPending && p.ProposedBy.Equals(reviewed.ProposedBy, StringComparison.OrdinalIgnoreCase))
+                         .ToList())
+            {
+                _proposals[stale.Id] = stale with
+                {
+                    State = ProposalState.Withdrawn,
+                    DecidedAt = DateTimeOffset.UtcNow,
+                    Decision = "Replaced by a newer proposal from the same agent.",
+                };
+            }
+
+            _proposals[reviewed.Id] = reviewed;
+        }
+
+        ProposalArrived?.Invoke(reviewed);
+        StateChanged?.Invoke();
+        return reviewed;
+    }
+
+    /// <summary>
+    /// The operator saying yes. Builds an ordinary mission and starts it.
+    /// </summary>
+    /// <param name="edited">
+    /// The proposal as the operator left it after editing. Null accepts it as written.
+    /// </param>
+    /// <remarks>
+    /// ⚠️ The proposal leaves Pending <em>before</em> the mission is built, not after. A double
+    /// click on Start is one event away from two calls, and the tidy-looking version — check
+    /// pending, create, then mark accepted — lets both through and opens the same mission twice.
+    /// Two engines, two ledgers, one objective, and the second silently becomes the active one.
+    /// </remarks>
+    public MissionEngine? AcceptProposal(string id, MissionProposal? edited = null)
+    {
+        MissionProposal proposal;
+
+        lock (_gate)
+        {
+            if (_proposals.GetValueOrDefault(id) is not { IsPending: true } pending)
+            {
+                return null;
+            }
+
+            proposal = edited is null ? pending : edited with { Id = pending.Id, CreatedAt = pending.CreatedAt };
+
+            _proposals[id] = proposal with
+            {
+                State = ProposalState.Accepted,
+                DecidedAt = DateTimeOffset.UtcNow,
+            };
+        }
+
+        var engine = CreateMission(proposal.ToMission());
+        engine.Start();
+
+        lock (_gate)
+        {
+            _proposals[id] = _proposals[id] with { MissionId = engine.Mission.Id };
+        }
+
+        StateChanged?.Invoke();
+        return engine;
+    }
+
+    /// <summary>The operator saying no. The reason goes back to the agent verbatim.</summary>
+    public MissionProposal? RejectProposal(string id, string? reason)
+    {
+        lock (_gate)
+        {
+            if (_proposals.GetValueOrDefault(id) is not { IsPending: true } pending)
+            {
+                return null;
+            }
+
+            var rejected = pending with
+            {
+                State = ProposalState.Rejected,
+                DecidedAt = DateTimeOffset.UtcNow,
+                Decision = string.IsNullOrWhiteSpace(reason)
+                    ? "The operator discarded this proposal without giving a reason."
+                    : reason,
+            };
+
+            _proposals[id] = rejected;
+            StateChanged?.Invoke();
+            return rejected;
+        }
+    }
+
+    /// <summary>Raised when an agent proposes a mission, so the window can come forward.</summary>
+    public event Action<MissionProposal>? ProposalArrived;
 
     public void SetActiveMission(string missionId)
     {

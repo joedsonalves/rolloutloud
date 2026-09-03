@@ -105,7 +105,62 @@ curl -X POST "$EP/v1/missions" -H "X-RolloutLoud-Token: $TK" -d '{
 ```
 
 `scope` is optional and most missions leave it out. Returns the mission, the composed briefing,
-and a `warning` when targets are declared with no approval recorded.
+a `warning` when targets are declared with no approval recorded, and a `gateReview` — read it,
+because it is RolloutLoud telling you what your own gate fails to test.
+
+### `POST /v1/missions/proposals` — the operator asked *you* to set the mission up
+
+Use this when the operator says "open RolloutLoud and give it this objective". You know the
+repository and which command actually proves the thing; they are typing a sentence in a hurry.
+
+```bash
+curl -X POST "$EP/v1/missions/proposals" -H "X-RolloutLoud-Token: $TK" -d '{
+  "objective": "make the intermittent checkout failure reproducible, then fix it",
+  "gateCommand": "dotnet test tests/Checkout -c Release",
+  "why": "that suite is the one that flakes, and it fails cleanly while the bug is present",
+  "proposedBy": "claude"
+}'
+```
+
+**It answers `202`, and nothing was created.** Composing a mission means composing its success
+gate, and a gate you wrote for yourself is not a gate — it is your own opinion of "done" wearing a
+command's clothes. So this puts the mission on the operator's screen and they start it or throw it
+away. Poll `GET /v1/missions/proposals/{id}` until `state` leaves `pending`:
+
+| `state` | what to do |
+| --------- | ------------------------------------------------------------------------ |
+| `pending` | keep waiting; they may be reading the gate |
+| `accepted` | `briefing` is in the response and the mission is running. Work it |
+| `rejected` | `decision` says what was wrong. Fix **that** and propose again |
+| `withdrawn` | you proposed something newer. Follow the newer one |
+
+`gateReview` comes back on the `202`, before the operator has touched it. If it found something,
+**fix it and propose again rather than waiting to be told** — you will get the same note from a
+person a minute later, and they may just discard instead.
+
+#### What RolloutLoud will say about your gate
+
+It is looking for the gate that ends the run without proving anything:
+
+| shape | why it is not a gate |
+| ------------------------------- | ------------------------------------------------------- |
+| `dotnet test \|\| true` | the shell reports the last command; this cannot fail |
+| `test -f REPORT.md` | writing a file is the one thing you can always do |
+| `grep -q CRITICAL findings.json` | the same, with a coat of diligence on |
+| anything under `.rolloutloud/` | you wrote those records; the gate would ask you |
+| `claude -p "is this good?"` | a model's opinion, which is what the gate replaces |
+
+A gate that **re-derives** the result is what you want: a test, a build, the scan run again. Text
+piped from a tool is fine — `nuclei -u … \| grep -q critical` reads what a scanner just produced,
+not a file you authored, and is not flagged.
+
+Nothing here is ever refused. A gate that looks self-certifying is sometimes exactly right, and
+RolloutLoud does not know which — it marks, so that the operator's eye lands on the gate before it
+becomes the finish line.
+
+`rollout propose "<objective>" --gate "<command>" --why "<reasoning>"` does all of this, opens
+RolloutLoud if it is shut, and blocks until the operator answers. It exits `0` when they start it,
+`2` when they discard it.
 
 ### `GET /v1/missions/active/briefing` — what you are doing
 

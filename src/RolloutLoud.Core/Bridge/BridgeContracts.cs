@@ -57,6 +57,44 @@ public sealed record MissionRequest
     public double? MaxHours { get; init; }
 }
 
+/// <summary>
+/// A mission the agent composed, offered to the operator rather than started.
+/// </summary>
+/// <remarks>
+/// Every field of <see cref="MissionRequest"/>, plus <see cref="Rationale"/>. The overlap is
+/// deliberate: an agent that has composed a proposal and had it rejected should be able to fix one
+/// field and re-propose, not translate between two vocabularies.
+/// </remarks>
+public sealed record ProposalRequest
+{
+    public required string Objective { get; init; }
+
+    /// <summary>Which CLI would work it. Defaults to the one proposing.</summary>
+    public string? Agent { get; init; }
+
+    /// <summary>Which CLI is asking. Shown to the operator, so they know who wrote this.</summary>
+    public string? ProposedBy { get; init; }
+
+    public string? GateCommand { get; init; }
+
+    public string? GateDescription { get; init; }
+
+    public IReadOnlyList<string>? Scope { get; init; }
+
+    public IReadOnlyList<string>? ScopeExclusions { get; init; }
+
+    public string? Authorization { get; init; }
+
+    public string? Offload { get; init; }
+
+    public int? MaxAttempts { get; init; }
+
+    public double? MaxHours { get; init; }
+
+    /// <summary>Why this gate and this scope. The field that makes the operator's review quick.</summary>
+    public string? Rationale { get; init; }
+}
+
 /// <summary>Declaring an attempt before running it. The hypothesis is required, and that is the point.</summary>
 public sealed record AdmitRequest
 {
