@@ -28,6 +28,9 @@
             <TextBlock Text="{Binding ElevationBadge}" FontSize="12" FontWeight="Bold" HorizontalAlignment="Right" />
             <TextBlock Text="{Binding ElevationDetail}" Classes="hint" MaxWidth="380" TextAlignment="Right" />
           </StackPanel>
+          <Button Content="{Binding ThemeGlyph}" Command="{Binding ToggleTheme}"
+                  ToolTip.Tip="{Binding ThemeTooltip}"
+                  FontSize="17" Padding="12,4" MinWidth="44" VerticalAlignment="Center" />
           <Button Content="{loc:Tr Key=app.elevate}" Command="{Binding Elevate}" Padding="14,8"
                   IsVisible="{Binding !IsElevated}" />
         </StackPanel>
@@ -78,6 +81,23 @@
       <ScrollViewer Grid.Column="1" Margin="0,0,12,0">
         <StackPanel>
           <TextBlock Text="{loc:Tr Key=mission.title}" Classes="section" />
+
+          <!-- Several agents work in this window at once, one mission each. Which row is selected
+               decides what "active" means to an agent that calls the bridge without naming one. -->
+          <Border Classes="card" IsVisible="{Binding OpenMissions.Count}">
+            <StackPanel Spacing="6">
+              <TextBlock Text="{loc:Tr Key=mission.open}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{loc:Tr Key=mission.open.hint}" Classes="hint" />
+              <ComboBox ItemsSource="{Binding OpenMissions}" SelectedItem="{Binding SelectedMission}"
+                        HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:MissionSummaryItem">
+                    <TextBlock Text="{Binding Label}" FontSize="12" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+            </StackPanel>
+          </Border>
 
           <Border Classes="card">
             <StackPanel Spacing="10">
@@ -162,6 +182,18 @@
               </Grid>
 
               <TextBlock Text="{Binding WatchdogStatus}" Classes="hint" />
+            </StackPanel>
+          </Border>
+
+          <!-- An agent can ask to close the window when it is finished. The request is judged on
+               MissionState, which only a twice-passed gate can set to Achieved — so "I could not
+               do it" arrives as Exhausted and is refused. -->
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{loc:Tr Key=shutdown.title}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{loc:Tr Key=shutdown.hint}" Classes="hint" />
+              <CheckBox IsChecked="{Binding AllowUnattendedShutdown}" Content="{loc:Tr Key=shutdown.unattended}" />
+              <TextBlock Text="{loc:Tr Key=shutdown.unattended.hint}" Classes="hint" Margin="20,0,0,0" />
             </StackPanel>
           </Border>
 

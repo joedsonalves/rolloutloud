@@ -9,6 +9,7 @@ using RolloutLoud.Core.Buttons;
 using RolloutLoud.Core.Localization;
 using RolloutLoud.Core.Missions;
 using RolloutLoud.Core.Watchdog;
+using RolloutLoud.Core.Workspace;
 
 namespace RolloutLoud.App.Views;
 
@@ -113,6 +114,24 @@ public sealed class ButtonCard(FluidButton button, MainViewModel owner) : Observ
     }
 }
 
+/// <summary>One row in the open-missions list.</summary>
+public sealed class MissionSummaryItem(RolloutLoud.Core.Missions.MissionEngine engine) : Observable
+{
+    public string Id => engine.Mission.Id;
+
+    public string Label =>
+        $"{Truncate(engine.Mission.Objective, 60)}  ·  {engine.Mission.AgentId}  ·  " +
+        $"{engine.Mission.State}  ·  T{engine.Mission.EscalationTier}  ·  {engine.Ledger.Count}";
+
+    public void Refresh() => Raise(nameof(Label));
+
+    private static string Truncate(string value, int max)
+    {
+        var oneLine = value.ReplaceLineEndings(" ").Trim();
+        return oneLine.Length <= max ? oneLine : oneLine[..max] + "…";
+    }
+}
+
 public sealed class MainViewModel : Observable
 {
     private readonly RolloutHost _host;
@@ -131,6 +150,12 @@ public sealed class MainViewModel : Observable
     private int _maxAttempts = 200;
     private double _maxHours = 6;
     private bool _watchdogEnabled = true;
+    private bool _allowUnattendedShutdown;
+    private MissionSummaryItem? _selectedMission;
+    // Normalised to the two the toggle moves between. ROLLOUTLOUD_THEME=system still applies to
+    // the window itself; it just is not a state the button can land on.
+    private ThemeChoice _theme =
+        UiPreferences.Load().Effective == ThemeChoice.Light ? ThemeChoice.Light : ThemeChoice.Dark;
     private double _watchdogRoundMinutes = 20;
     private string _selectedAgentId = AgentCatalog.Claude;
     private MissionEngine? _mission;
@@ -149,6 +174,7 @@ public sealed class MainViewModel : Observable
         CheckGate = new RelayCommand(_ => CheckGateAsync(), _ => _mission is not null);
         ToggleSupervision = new RelayCommand(_ => ToggleSupervisionAsync(), _ => _mission is not null);
         Elevate = new RelayCommand(_ => ElevateAsync(), _ => !IsElevated && _host.Elevation.CanElevate);
+        ToggleTheme = new RelayCommand(_ => FlipTheme());
         OpenAllowlist = new RelayCommand(_ => WriteStarterConfiguration());
 
         host.StateChanged += OnHostChanged;
@@ -175,6 +201,82 @@ public sealed class MainViewModel : Observable
     public ObservableCollection<string> Activity { get; } = [];
 
     public ObservableCollection<string> Ledger { get; } = [];
+
+    /// <summary>
+    /// Every mission open in this window.
+    /// </summary>
+    /// <remarks>
+    /// Several agents work here at once — one mission each — so this is not decoration. Which one
+    /// is selected decides what "active" resolves to for an agent that calls the bridge without
+    /// naming a mission, which is most of them.
+    /// </remarks>
+    public ObservableCollection<MissionSummaryItem> OpenMissions { get; } = [];
+
+    public MissionSummaryItem? SelectedMission
+    {
+        get => _selectedMission;
+        set
+        {
+            Set(ref _selectedMission, value);
+            if (value is null)
+            {
+                return;
+            }
+
+            _mission = _host.FindMission(value.Id);
+            _host.SetActiveMission(value.Id);
+            RefreshMission();
+        }
+    }
+
+    /// <summary>
+    /// Whether an agent may close the window without a click.
+    /// </summary>
+    /// <remarks>
+    /// Off by default, and the split is deliberate: the gate decides whether the WORK is done, and
+    /// this decides whether the operator wants the window gone as a result. Two different
+    /// questions, and the second one is theirs.
+    /// </remarks>
+    public bool AllowUnattendedShutdown
+    {
+        get => _allowUnattendedShutdown;
+        set
+        {
+            Set(ref _allowUnattendedShutdown, value);
+            _host.AllowUnattendedShutdown = value;
+        }
+    }
+
+    /// <summary>
+    /// Sun or moon, one click, two states.
+    /// </summary>
+    /// <remarks>
+    /// The glyph shows what clicking will GIVE you, not what you have — the usual convention for
+    /// a theme toggle, and unambiguous here because there are only two states to move between.
+    /// The tooltip says it in words as well, because a bare glyph is a guess for anybody who has
+    /// not met the convention.
+    ///
+    /// "Follow the system" is deliberately not offered. It is a third state that has to be
+    /// explained, and its value is mostly to somebody who changes their OS theme during the day.
+    /// ROLLOUTLOUD_THEME=system still reaches it for a contrast check.
+    /// </remarks>
+    public string ThemeGlyph => _theme == ThemeChoice.Dark ? "☀" : "☽";
+
+    public string ThemeTooltip =>
+        Localizer.Current[_theme == ThemeChoice.Dark ? "theme.toLight" : "theme.toDark"];
+
+    public RelayCommand ToggleTheme { get; }
+
+    private Task FlipTheme()
+    {
+        _theme = _theme == ThemeChoice.Dark ? ThemeChoice.Light : ThemeChoice.Dark;
+        AvaloniaApp.SetTheme(_theme);
+
+        Raise(nameof(ThemeGlyph));
+        Raise(nameof(ThemeTooltip));
+        Log($"Theme: {_theme}. Remembered in {UiPreferences.FilePath}");
+        return Task.CompletedTask;
+    }
 
     public string RepositoryRoot => _host.Paths.RepositoryRoot;
 
@@ -424,7 +526,7 @@ public sealed class MainViewModel : Observable
 
         var mission = new Mission
         {
-            Id = "m-" + DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss"),
+            Id = Mission.NewId(),
             Objective = Objective.Trim(),
             AgentId = SelectedAgentId,
             Gate = gate,
@@ -445,6 +547,9 @@ public sealed class MainViewModel : Observable
 
         _mission = _host.CreateMission(mission);
         _mission.Start();
+        SyncMissions();
+        _selectedMission = OpenMissions.FirstOrDefault(m => m.Id == mission.Id);
+        Raise(nameof(SelectedMission));
 
         Log($"Mission {mission.Id} started on {mission.AgentId}.");
         if (!gate.IsMachineCheckable)
@@ -586,8 +691,28 @@ public sealed class MainViewModel : Observable
     private void OnHostChanged() => Dispatcher.UIThread.Post(() =>
     {
         SyncButtons();
+        SyncMissions();
         RefreshMission();
     });
+
+    private void SyncMissions()
+    {
+        foreach (var engine in _host.Missions.OrderByDescending(m => m.Mission.CreatedAt))
+        {
+            var existing = OpenMissions.FirstOrDefault(m => m.Id == engine.Mission.Id);
+            if (existing is null)
+            {
+                OpenMissions.Add(new MissionSummaryItem(engine));
+            }
+            else
+            {
+                existing.Refresh();
+            }
+        }
+    }
+
+    /// <summary>Records why the window is about to close, so the last log line explains it.</summary>
+    internal void NoteShutdown(string reason) => Log("Closing: " + reason);
 
     private void SyncButtons()
     {
