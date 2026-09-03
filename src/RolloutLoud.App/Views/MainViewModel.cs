@@ -6,7 +6,9 @@ using RolloutLoud.Core;
 using RolloutLoud.Core.Agents;
 using RolloutLoud.Core.Bridge;
 using RolloutLoud.Core.Buttons;
+using RolloutLoud.Core.Localization;
 using RolloutLoud.Core.Missions;
+using RolloutLoud.Core.Watchdog;
 
 namespace RolloutLoud.App.Views;
 
@@ -40,7 +42,11 @@ public sealed class AgentLauncher(AgentDescriptor descriptor, MainViewModel owne
 
     public string ElevatedCommandLine => Descriptor.CommandLineFor(LaunchMode.Elevated);
 
-    public string? Notes => Descriptor.Notes;
+    /// <summary>
+    /// Resolved rather than shown raw: the shipped notes are localisation keys, while a note an
+    /// operator wrote into agents.json comes back exactly as they typed it.
+    /// </summary>
+    public string? Notes => Localizer.Current.Resolve(Descriptor.Notes);
 
     public RelayCommand LaunchNormal { get; } =
         new(_ => owner.Launch(descriptor, LaunchMode.Normal));
@@ -75,7 +81,7 @@ public sealed class ButtonCard(FluidButton button, MainViewModel owner) : Observ
     public string Command => _button.Command;
 
     public string Rationale => string.IsNullOrWhiteSpace(_button.Rationale)
-        ? $"Requested by {_button.RequestedBy ?? "an agent"}."
+        ? Localizer.Current.Format("buttons.requestedBy", _button.RequestedBy ?? Localizer.Current["buttons.anAgent"])
         : _button.Rationale!;
 
     public bool IsOpen => _button.IsOpen;
@@ -83,12 +89,12 @@ public sealed class ButtonCard(FluidButton button, MainViewModel owner) : Observ
     public string StatusLine => _button.Status switch
     {
         ButtonStatus.Pending when _button.Disposition == ButtonDisposition.AutoInvokable =>
-            "Pending — on the allowlist, so the agent can also run this itself.",
-        ButtonStatus.Pending => "Pending — waiting for you.",
-        ButtonStatus.Running => "Running…",
-        ButtonStatus.Succeeded => "Done. " + Excerpt(_button.OutputExcerpt),
-        ButtonStatus.Failed => $"Failed (exit {_button.ExitCode}). " + Excerpt(_button.OutputExcerpt),
-        _ => "Dismissed.",
+            Localizer.Current["buttons.pendingAuto"],
+        ButtonStatus.Pending => Localizer.Current["buttons.pending"],
+        ButtonStatus.Running => Localizer.Current["buttons.running"],
+        ButtonStatus.Succeeded => Localizer.Current.Format("buttons.succeeded", Excerpt(_button.OutputExcerpt)),
+        ButtonStatus.Failed => Localizer.Current.Format("buttons.failed", _button.ExitCode, Excerpt(_button.OutputExcerpt)),
+        _ => Localizer.Current["buttons.dismissed"],
     };
 
     public RelayCommand Run { get; } = new(_ => owner.InvokeButtonAsync(button.Id));
@@ -111,6 +117,7 @@ public sealed class MainViewModel : Observable
 {
     private readonly RolloutHost _host;
     private readonly BridgeServer _bridge;
+    private readonly AgentSupervisor _supervisor;
 
     private string _objective = string.Empty;
     private string _gateCommand = string.Empty;
@@ -123,6 +130,8 @@ public sealed class MainViewModel : Observable
     private int _tokenThreshold = 120_000;
     private int _maxAttempts = 200;
     private double _maxHours = 6;
+    private bool _watchdogEnabled = true;
+    private double _watchdogRoundMinutes = 20;
     private string _selectedAgentId = AgentCatalog.Claude;
     private MissionEngine? _mission;
 
@@ -130,6 +139,7 @@ public sealed class MainViewModel : Observable
     {
         _host = host;
         _bridge = bridge;
+        _supervisor = new AgentSupervisor(host, host.Paths);
 
         Agents = [.. host.Agents.Select(a => new AgentLauncher(a, this))];
 
@@ -137,6 +147,7 @@ public sealed class MainViewModel : Observable
         PauseMission = new RelayCommand(_ => TogglePause(), _ => _mission is not null);
         AbortMission = new RelayCommand(_ => AbortCurrentMission(), _ => _mission is not null);
         CheckGate = new RelayCommand(_ => CheckGateAsync(), _ => _mission is not null);
+        ToggleSupervision = new RelayCommand(_ => ToggleSupervisionAsync(), _ => _mission is not null);
         Elevate = new RelayCommand(_ => ElevateAsync(), _ => !IsElevated && _host.Elevation.CanElevate);
         OpenAllowlist = new RelayCommand(_ => WriteStarterConfiguration());
 
@@ -144,7 +155,14 @@ public sealed class MainViewModel : Observable
         bridge.Logged += message => Dispatcher.UIThread.Post(() => Log(message));
         RelayCommand.Failed += ex => Dispatcher.UIThread.Post(() => Log("Error: " + ex.Message));
 
+        _supervisor.Logged += e => Dispatcher.UIThread.Post(() =>
+        {
+            Log($"[watchdog:{e.Kind}] {e.Message}");
+            RefreshWatchdog();
+        });
+
         Log($"Anchored to {host.Paths.RepositoryRoot}");
+        Log($"Language: {Localizer.Current.Language}");
         Log(IsElevated
             ? "Running elevated. Fluid buttons and elevated CLIs will start without another prompt."
             : "Running unelevated. Elevated launches will offer to restart RolloutLoud first.");
@@ -160,16 +178,16 @@ public sealed class MainViewModel : Observable
 
     public string RepositoryRoot => _host.Paths.RepositoryRoot;
 
-    public string BridgeEndpoint => _bridge.Endpoint;
+    public string BridgeHint => Localizer.Current.Format("app.bridge.hint", _bridge.Endpoint);
 
     public bool IsElevated => _host.Elevation.IsElevated;
 
-    public string ElevationBadge => IsElevated ? "ELEVATED" : "not elevated";
+    public string ElevationBadge => Localizer.Current[IsElevated ? "app.elevated" : "app.notElevated"];
 
     public string ElevationDetail => IsElevated
-        ? "Every CLI and every fluid button started from here inherits administrative rights."
+        ? Localizer.Current["app.elevated.detail"]
         : _host.Elevation.CanElevate
-            ? "Elevated launches will offer to restart RolloutLoud through the OS prompt first."
+            ? Localizer.Current["app.notElevated.detail"]
             : _host.Elevation.PromptDescription;
 
     public IReadOnlyList<string> AgentIds => [.. _host.Agents.Select(a => a.Id)];
@@ -234,8 +252,7 @@ public sealed class MainViewModel : Observable
     /// </summary>
     public string ScopeWarning =>
         !string.IsNullOrWhiteSpace(ScopeTargets) && string.IsNullOrWhiteSpace(ScopeAuthorization)
-            ? "Targets are declared but authorisation is blank. Record who authorised this engagement " +
-              "and under what reference before starting."
+            ? Localizer.Current["scope.warning"]
             : string.Empty;
 
     public bool OffloadEnabled
@@ -268,13 +285,37 @@ public sealed class MainViewModel : Observable
         set => Set(ref _maxHours, value);
     }
 
-    public string MissionSummary => _mission is null
-        ? "No mission. Write the outcome you want above and start one — the agents read it before their first turn."
-        : $"{_mission.Mission.State} · tier {_mission.Mission.EscalationTier} " +
-          $"({EscalationLadder.NameOf(_mission.Mission.EscalationTier)}) · " +
-          $"{_mission.Ledger.Count} attempt(s) · on {_mission.Mission.AgentId}";
+    public bool WatchdogEnabled
+    {
+        get => _watchdogEnabled;
+        set => Set(ref _watchdogEnabled, value);
+    }
 
-    public string PauseLabel => _mission?.Mission.State == MissionState.Paused ? "Resume" : "Pause";
+    public double WatchdogRoundMinutes
+    {
+        get => _watchdogRoundMinutes;
+        set => Set(ref _watchdogRoundMinutes, value);
+    }
+
+    public string WatchdogStatus => _supervisor.IsRunning
+        ? Localizer.Current.Format("watchdog.status.running", _supervisor.AgentId, _supervisor.Round)
+        : Localizer.Current["watchdog.status.idle"];
+
+    public string SuperviseLabel =>
+        Localizer.Current[_supervisor.IsRunning ? "action.stopSupervision" : "action.supervise"];
+
+    public string MissionSummary => _mission is null
+        ? Localizer.Current["mission.none"]
+        : Localizer.Current.Format(
+            "mission.summary",
+            _mission.Mission.State,
+            _mission.Mission.EscalationTier,
+            EscalationLadder.NameOf(_mission.Mission.EscalationTier),
+            _mission.Ledger.Count,
+            _mission.Mission.AgentId);
+
+    public string PauseLabel =>
+        Localizer.Current[_mission?.Mission.State == MissionState.Paused ? "action.resume" : "action.pause"];
 
     public RelayCommand StartMission { get; }
 
@@ -283,6 +324,8 @@ public sealed class MainViewModel : Observable
     public RelayCommand AbortMission { get; }
 
     public RelayCommand CheckGate { get; }
+
+    public RelayCommand ToggleSupervision { get; }
 
     public RelayCommand Elevate { get; }
 
@@ -297,7 +340,7 @@ public sealed class MainViewModel : Observable
     }
 
     /// <summary>
-    /// The elevated launch, including the warning the operator asked for.
+    /// The elevated launch, including the warning.
     /// </summary>
     /// <remarks>
     /// The order matters. If RolloutLoud is not elevated it offers to restart itself first,
@@ -418,6 +461,45 @@ public sealed class MainViewModel : Observable
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Starts or stops supervision — RolloutLoud running the agent itself and restarting it when
+    /// it stops before the gate is satisfied.
+    /// </summary>
+    private async Task ToggleSupervisionAsync()
+    {
+        if (_supervisor.IsRunning)
+        {
+            await _supervisor.StopAsync().ConfigureAwait(true);
+            RefreshWatchdog();
+            return;
+        }
+
+        if (_mission is null)
+        {
+            return;
+        }
+
+        if (!WatchdogEnabled)
+        {
+            Log("The watchdog is switched off, so a supervised run would launch the agent once and " +
+                "let it stop. Turn it on first, or use a launch button.");
+            return;
+        }
+
+        _supervisor.Settings = _supervisor.Settings with
+        {
+            RoundTimeout = TimeSpan.FromMinutes(Math.Max(1, WatchdogRoundMinutes)),
+        };
+
+        // Supervised rounds are headless — there is no terminal for the operator to type into.
+        // That is the trade for being able to restart the process at all, and saying it here
+        // beats the operator discovering it by looking for a window that never appears.
+        Log("Supervised rounds run headless: no terminal window, output captured to .rolloutloud/runs/.");
+
+        _supervisor.Start(_mission);
+        RefreshWatchdog();
+    }
+
     private Task TogglePause()
     {
         if (_mission is null)
@@ -440,12 +522,17 @@ public sealed class MainViewModel : Observable
         return Task.CompletedTask;
     }
 
-    private Task AbortCurrentMission()
+    private async Task AbortCurrentMission()
     {
+        if (_supervisor.IsRunning)
+        {
+            await _supervisor.StopAsync().ConfigureAwait(true);
+        }
+
         _mission?.Abort("Aborted from the RolloutLoud window.");
         Log("Mission aborted.");
         RefreshMission();
-        return Task.CompletedTask;
+        RefreshWatchdog();
     }
 
     private async Task CheckGateAsync()
@@ -519,6 +606,13 @@ public sealed class MainViewModel : Observable
         }
     }
 
+    private void RefreshWatchdog()
+    {
+        Raise(nameof(WatchdogStatus));
+        Raise(nameof(SuperviseLabel));
+        RefreshMission();
+    }
+
     private void RefreshMission()
     {
         Raise(nameof(MissionSummary));
@@ -526,6 +620,7 @@ public sealed class MainViewModel : Observable
         PauseMission.RaiseCanExecuteChanged();
         AbortMission.RaiseCanExecuteChanged();
         CheckGate.RaiseCanExecuteChanged();
+        ToggleSupervision.RaiseCanExecuteChanged();
 
         Ledger.Clear();
         if (_mission is null)

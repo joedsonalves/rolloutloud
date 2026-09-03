@@ -1,7 +1,51 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="RolloutLoud.App.AvaloniaApp"
-             RequestedThemeVariant="Dark">
+             RequestedThemeVariant="Default">
+
+  <!-- Default, not Dark: the window follows whatever the OS is set to. Every colour below is
+       defined in BOTH variants, so nothing falls back to a Fluent default that happens to be
+       unreadable on the other side. -->
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="RlWindow" Color="#151517" />
+          <SolidColorBrush x:Key="RlHeader" Color="#1C1C1F" />
+          <SolidColorBrush x:Key="RlSurface" Color="#1C1C1F" />
+          <SolidColorBrush x:Key="RlSurfaceSunken" Color="#111113" />
+          <SolidColorBrush x:Key="RlBorder" Color="#2A2A2E" />
+          <SolidColorBrush x:Key="RlText" Color="#E8EAF0" />
+          <SolidColorBrush x:Key="RlWarning" Color="#E0A030" />
+
+          <!-- The elevated-launch pair. Red in both variants and nowhere else in the app: it is
+               the one colour that has to mean exactly one thing. -->
+          <SolidColorBrush x:Key="RlElevated" Color="#4A1F1F" />
+          <SolidColorBrush x:Key="RlElevatedHover" Color="#5E2626" />
+          <SolidColorBrush x:Key="RlElevatedBorder" Color="#B4433A" />
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="RlWindow" Color="#F7F7F9" />
+          <SolidColorBrush x:Key="RlHeader" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="RlSurface" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="RlSurfaceSunken" Color="#F0F1F4" />
+          <SolidColorBrush x:Key="RlBorder" Color="#E2E4EA" />
+          <SolidColorBrush x:Key="RlText" Color="#16181D" />
+
+          <!-- Darker amber than the dark variant. #E0A030 on white is roughly 2:1 contrast —
+               legible as decoration, not as the warning it actually is. -->
+          <SolidColorBrush x:Key="RlWarning" Color="#8A5300" />
+
+          <SolidColorBrush x:Key="RlElevated" Color="#FDECEA" />
+          <SolidColorBrush x:Key="RlElevatedHover" Color="#F9DAD6" />
+          <SolidColorBrush x:Key="RlElevatedBorder" Color="#C0392B" />
+        </ResourceDictionary>
+
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
 
   <Application.Styles>
     <FluentTheme />
@@ -17,13 +61,14 @@
          every approval prompt turned off, and the operator has to be able to tell at a glance
          which half of the pair they are about to click. -->
     <Style Selector="Button.elevated">
-      <Setter Property="Background" Value="#4A1F1F" />
-      <Setter Property="BorderBrush" Value="#B4433A" />
+      <Setter Property="Background" Value="{DynamicResource RlElevated}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource RlElevatedBorder}" />
       <Setter Property="BorderThickness" Value="1" />
     </Style>
 
     <Style Selector="Button.elevated:pointerover /template/ ContentPresenter">
-      <Setter Property="Background" Value="#5E2626" />
+      <Setter Property="Background" Value="{DynamicResource RlElevatedHover}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource RlElevatedBorder}" />
     </Style>
 
     <Style Selector="TextBlock.section">
@@ -35,12 +80,18 @@
 
     <Style Selector="TextBlock.hint">
       <Setter Property="FontSize" Value="11" />
-      <Setter Property="Opacity" Value="0.55" />
+      <Setter Property="Opacity" Value="0.6" />
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
 
+    <Style Selector="TextBlock.mono">
+      <Setter Property="FontFamily" Value="Consolas,Menlo,monospace" />
+    </Style>
+
     <Style Selector="Border.card">
-      <Setter Property="Background" Value="#1C1C1F" />
+      <Setter Property="Background" Value="{DynamicResource RlSurface}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource RlBorder}" />
+      <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="6" />
       <Setter Property="Padding" Value="12" />
       <Setter Property="Margin" Value="0,0,0,8" />

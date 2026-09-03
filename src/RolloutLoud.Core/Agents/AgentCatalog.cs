@@ -26,9 +26,16 @@ public static class AgentCatalog
             Executable = "claude",
             NormalArguments = [],
             ElevatedArguments = ["--dangerously-skip-permissions"],
-            InstructionFile = "CLAUDE.md",
+            // CLAUDE.local.md, not CLAUDE.md, and the distinction is load-bearing.
+            //
+            // Claude Code auto-loads both at session start, so either would reach the agent. But
+            // this file is REWRITTEN on every launch, and CLAUDE.md is where the project rules
+            // live — so pointing the writer at it means one bug in the marker handling eats the
+            // rules, and deleting the file by hand means the next launch recreates it containing
+            // only a mission. Separating them makes the rules a thing the tool never touches.
+            InstructionFile = "CLAUDE.local.md",
             PromptArguments = ["-p", "{prompt}"],
-            Notes = "--dangerously-skip-permissions turns off every permission prompt.",
+            Notes = "agents.notes.claude",
         },
         new AgentDescriptor
         {
@@ -39,7 +46,7 @@ public static class AgentCatalog
             ElevatedArguments = ["--dangerously-bypass-approvals-and-sandbox"],
             InstructionFile = "AGENTS.md",
             PromptArguments = ["exec", "{prompt}"],
-            Notes = "Skips approvals AND the sandbox. Codex calls this one extremely dangerous itself.",
+            Notes = "agents.notes.codex",
         },
         new AgentDescriptor
         {
@@ -50,7 +57,7 @@ public static class AgentCatalog
             ElevatedArguments = ["chat", "--yolo"],
             InstructionFile = "HERMES.md",
             PromptArguments = ["-z", "{prompt}"],
-            Notes = "--yolo is a global flag; it goes before the subcommand as well as after.",
+            Notes = "agents.notes.hermes",
         },
         new AgentDescriptor
         {
@@ -61,10 +68,7 @@ public static class AgentCatalog
             ElevatedArguments = ["tui"],
             InstructionFile = "OPENCLAW.md",
             PromptArguments = ["agent", "--message", "{prompt}"],
-            Notes =
-                "OpenClaw has no single bypass flag: permission lives in `openclaw approvals` and " +
-                "`openclaw exec-policy`, which are persisted host state rather than a launch argument. " +
-                "The elevated button therefore only elevates the process — set the exec policy once, by hand.",
+            Notes = "agents.notes.openclaw",
         },
     ];
 

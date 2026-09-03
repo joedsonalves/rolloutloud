@@ -1,4 +1,5 @@
 using Avalonia;
+using RolloutLoud.Core.Localization;
 using RolloutLoud.Core.Workspace;
 
 namespace RolloutLoud.App;
@@ -24,6 +25,10 @@ internal static class Program
     {
         var repo = ReadRepositoryArgument(args) ?? Directory.GetCurrentDirectory();
         Paths = RolloutPaths.Discover(repo);
+
+        // Before any window is built: the markup extension that resolves labels reads the
+        // language once, at load, so this has to happen first or the whole UI comes up English.
+        Localizer.Initialize();
 
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
