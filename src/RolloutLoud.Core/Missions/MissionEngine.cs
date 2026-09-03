@@ -1,4 +1,5 @@
 using RolloutLoud.Core.Execution;
+using RolloutLoud.Core.Safety;
 using RolloutLoud.Core.Workspace;
 
 namespace RolloutLoud.Core.Missions;
@@ -50,6 +51,17 @@ public sealed class MissionEngine
     public IReadOnlyList<MissionEvent> Events => _events;
 
     public event Action<MissionEngine>? Changed;
+
+    /// <summary>
+    /// Raised for every recorded event, with the event itself.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Changed"/>, which only says "something moved, redraw". Mission
+    /// events were being appended to a list nobody read: an escalation, a contradicted gate, a
+    /// scope block, a relay and an injection flag all happened silently. Those are the moments the
+    /// operator most needs to see, and a redraw notification cannot carry them.
+    /// </remarks>
+    public event Action<MissionEvent>? EventLogged;
 
     public static MissionEngine Create(Mission mission, MissionStore store, RolloutPaths paths)
     {
@@ -211,6 +223,19 @@ public sealed class MissionEngine
     {
         Ledger.Record(attempt);
         Log("attempt", $"[{attempt.Outcome}] {attempt.Hypothesis}");
+
+        // Surfaced, never blocked. The observation is evidence, and refusing it would both lose a
+        // real finding and hand an attacker a way to stop one being recorded — embed a trigger
+        // phrase and the report never lands. What the operator gets is a note that something in
+        // this run tried to talk to the agent rather than to them.
+        var injection = UntrustedText.Inspect(attempt.Observation);
+        if (injection.Found)
+        {
+            Log("injection",
+                $"Instruction-shaped text was recorded into the ledger by {attempt.AgentId} " +
+                $"({string.Join("; ", injection.Patterns)}). It is kept as evidence and fenced in " +
+                $"every briefing, not obeyed. Context: …{injection.Excerpt}…");
+        }
 
         var sinceTierChange = Ledger.Count - Mission.TierChangedAtAttempt;
 
@@ -414,7 +439,10 @@ public sealed class MissionEngine
 
     private void Log(string kind, string message)
     {
-        _events.Add(new MissionEvent(DateTimeOffset.UtcNow, kind, message));
+        var entry = new MissionEvent(DateTimeOffset.UtcNow, kind, message);
+
+        _events.Add(entry);
+        EventLogged?.Invoke(entry);
         Changed?.Invoke(this);
     }
 
