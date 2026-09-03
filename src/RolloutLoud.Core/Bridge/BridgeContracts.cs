@@ -208,6 +208,9 @@ public sealed record SubagentResponse
 {
     public required bool Dispatched { get; init; }
 
+    /// <summary>Refused for load, not for anything about the task. Worth retrying shortly.</summary>
+    public bool Throttled { get; init; }
+
     /// <summary>
     /// The whole point: one line, not a transcript.
     /// </summary>

@@ -177,6 +177,7 @@ public sealed class MainViewModel : Observable
         Elevate = new RelayCommand(_ => ElevateAsync(), _ => !IsElevated && _host.Elevation.CanElevate);
         ToggleTheme = new RelayCommand(_ => FlipTheme());
         AttachIdentity = new RelayCommand(_ => AttachIdentityFile());
+        TidyUp = new RelayCommand(_ => TidyWorkspace());
         RevealIdentity = new RelayCommand(_ => RevealIdentityFile(), _ => IdentityAttached);
         OpenAllowlist = new RelayCommand(_ => WriteStarterConfiguration());
 
@@ -191,6 +192,11 @@ public sealed class MainViewModel : Observable
         });
 
         Log($"Anchored to {host.Paths.RepositoryRoot}");
+
+        if (host.LastHousekeeping is { } tidy)
+        {
+            Log(tidy.Summary);
+        }
         Log($"Language: {Localizer.Current.Language}");
         Log(IsElevated
             ? "Running elevated. Fluid buttons and elevated CLIs will start without another prompt."
@@ -299,6 +305,34 @@ public sealed class MainViewModel : Observable
         Raise(nameof(ThemeGeometry));
         Raise(nameof(ThemeTooltip));
         Log($"Theme: {_theme}. Remembered in {UiPreferences.FilePath}");
+        return Task.CompletedTask;
+    }
+
+    // ---- housekeeping -----------------------------------------------------------------------
+
+    /// <summary>
+    /// What .rolloutloud/ currently holds, and what the last tidy removed.
+    /// </summary>
+    /// <remarks>
+    /// Visible rather than silent because the growth is invisible otherwise until somebody
+    /// wonders why a folder has twelve thousand directories in it. A number on screen is also what
+    /// makes the pruning trustworthy — an operator who can see it working does not have to take
+    /// it on faith that it is not eating something they wanted.
+    /// </remarks>
+    public string DiskSummary =>
+        _host.LastHousekeeping?.Summary ?? Localizer.Current["housekeeping.hint"];
+
+    public RelayCommand TidyUp { get; }
+
+    private Task TidyWorkspace()
+    {
+        var report = _host.Tidy();
+
+        Log(report.DidAnything
+            ? report.Summary
+            : "Nothing to tidy. " + report.Summary);
+
+        Raise(nameof(DiskSummary));
         return Task.CompletedTask;
     }
 
@@ -811,6 +845,7 @@ public sealed class MainViewModel : Observable
         SyncMissions();
         RefreshMission();
         RefreshIdentity();
+        Raise(nameof(DiskSummary));
     });
 
     private void SyncMissions()

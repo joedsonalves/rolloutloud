@@ -206,6 +206,14 @@ prose. The round still counts — it was paid for either way — but the `learne
 Refused with **409** when the mission is not running, when the named agent is unknown, or when it
 is not installed and therefore cannot be driven headlessly.
 
+Refused with **429** and `throttled: true` when four rounds are already running and this one waited
+five minutes for a slot. That one is worth retrying shortly; a 409 never is. Nothing was spent on a
+throttled request.
+
+⚠️ **Sending ten at once does not make them faster.** They queue behind each other either way, and
+past the queue wait they start being refused. Send a few, read the verdicts, decide again — that
+loop is the point of the endpoint.
+
 ### `POST /v1/missions/active/relay` — hand it to another CLI
 
 ```bash

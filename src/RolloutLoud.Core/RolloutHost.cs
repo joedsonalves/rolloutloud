@@ -35,12 +35,43 @@ public sealed class RolloutHost
         Paths.EnsureCreated();
 
         Store = new MissionStore(paths);
+        Housekeeping = new Housekeeper(paths);
 
         foreach (var record in Store.LoadAll())
         {
             var ledger = new MissionLedger(record.Mission.Id, record.Attempts);
             _engines[record.Mission.Id] = new MissionEngine(record.Mission, ledger, Store, paths);
         }
+
+        // Tidy after loading, not before: the missions have to be known so the run folders that
+        // still belong to an open one can be protected from the prune.
+        if (Housekeeping.Policy.RunOnStartup)
+        {
+            LastHousekeeping = Tidy();
+        }
+    }
+
+    public Housekeeper Housekeeping { get; }
+
+    /// <summary>What the last tidy found and removed. Shown in the window.</summary>
+    public HousekeepingReport? LastHousekeeping { get; private set; }
+
+    /// <summary>
+    /// Prunes run folders and archives finished missions.
+    /// </summary>
+    /// <remarks>
+    /// Run folders belonging to a mission that is still open are protected whatever their age.
+    /// Deleting the evidence under a running mission would leave ledger entries pointing at
+    /// nothing, which is worse than any amount of disk.
+    /// </remarks>
+    public HousekeepingReport Tidy()
+    {
+        var open = _engines.Values.Select(e => e.Mission).ToList();
+        var report = Housekeeping.Tidy(Housekeeper.ProtectedRunsFor(open, Store));
+
+        LastHousekeeping = report;
+        StateChanged?.Invoke();
+        return report;
     }
 
     public RolloutPaths Paths { get; }

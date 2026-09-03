@@ -677,11 +677,18 @@ public sealed class BridgeServer : IAsyncDisposable
 
         if (!result.Dispatched)
         {
-            await WriteAsync(context, HttpStatusCode.Conflict, new SubagentResponse
-            {
-                Dispatched = false,
-                Verdict = result.Detail,
-            }).ConfigureAwait(false);
+            // 429 when it was refused for load, 409 when it was refused for the request itself.
+            // The caller should retry the first and never the second, and one status for both
+            // would leave it guessing.
+            await WriteAsync(
+                context,
+                result.Throttled ? HttpStatusCode.TooManyRequests : HttpStatusCode.Conflict,
+                new SubagentResponse
+                {
+                    Dispatched = false,
+                    Verdict = result.Detail,
+                    Throttled = result.Throttled,
+                }).ConfigureAwait(false);
             return;
         }
 

@@ -12,6 +12,13 @@ public sealed record SubagentResult
     /// <summary>Why not, when <see cref="Dispatched"/> is false.</summary>
     public required string Detail { get; init; }
 
+    /// <summary>True when it was refused for load rather than for anything about the task.</summary>
+    /// <remarks>
+    /// Separated so the caller can tell "send this again in a minute" from "this will never work",
+    /// which are the same 409 otherwise and lead to opposite correct behaviours.
+    /// </remarks>
+    public bool Throttled { get; init; }
+
     public SubagentVerdict? Verdict { get; init; }
 
     /// <summary>Ledger entry id, when the round produced one.</summary>
@@ -48,17 +55,38 @@ public sealed class SubagentRunner
     private readonly RolloutHost _host;
     private readonly RolloutPaths _paths;
     private readonly SemaphoreSlim _concurrency;
+    private int _inFlight;
+    private int _waiting;
 
-    public SubagentRunner(RolloutHost host, RolloutPaths paths, int maxConcurrent = 2)
+    public SubagentRunner(RolloutHost host, RolloutPaths paths, int maxConcurrent = 4)
     {
         _host = host;
         _paths = paths;
 
-        // Capped because a main agent given a fire-and-forget endpoint will happily start ten
-        // rounds at once, and ten CLI processes on one machine is slower than three as well as
-        // more expensive.
-        _concurrency = new SemaphoreSlim(Math.Max(1, maxConcurrent));
+        // Capped because a main agent given an endpoint will happily start ten rounds at once, and
+        // ten CLI processes on one machine is slower than four as well as more expensive.
+        MaxConcurrent = Math.Max(1, maxConcurrent);
+        _concurrency = new SemaphoreSlim(MaxConcurrent);
     }
+
+    public int MaxConcurrent { get; }
+
+    /// <summary>
+    /// How long a round will queue for a slot before it is refused.
+    /// </summary>
+    /// <remarks>
+    /// The cap used to be enforced by an unbounded wait, which turned a burst of ten into eight
+    /// requests hanging until the caller's own HTTP timeout — and the agent then saw a timeout,
+    /// which reads as "RolloutLoud is broken" rather than "you sent too many at once". A bounded
+    /// wait and a 429 says the true thing, and says it in time to be acted on.
+    /// </remarks>
+    public TimeSpan MaxQueueWait { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>Rounds running right now.</summary>
+    public int InFlight => Volatile.Read(ref _inFlight);
+
+    /// <summary>Rounds queued for a slot right now.</summary>
+    public int Waiting => Volatile.Read(ref _waiting);
 
     public event Action<string>? Logged;
 
@@ -112,7 +140,36 @@ public sealed class SubagentRunner
             };
         }
 
-        await _concurrency.WaitAsync(cancellationToken).ConfigureAwait(false);
+        Interlocked.Increment(ref _waiting);
+        bool admitted;
+
+        try
+        {
+            admitted = await _concurrency
+                .WaitAsync(MaxQueueWait, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _waiting);
+        }
+
+        if (!admitted)
+        {
+            // Refused rather than queued forever. The caller learns it is over-sending while it can
+            // still do something about it, instead of collecting a timeout with no explanation.
+            return new SubagentResult
+            {
+                Dispatched = false,
+                Detail =
+                    $"Too many subagents at once: {MaxConcurrent} are already running and this one " +
+                    $"waited {MaxQueueWait:g} for a slot. Send fewer in parallel — they queue behind " +
+                    "each other anyway, and nothing was spent on this request.",
+                Throttled = true,
+            };
+        }
+
+        Interlocked.Increment(ref _inFlight);
 
         try
         {
@@ -120,6 +177,7 @@ public sealed class SubagentRunner
         }
         finally
         {
+            Interlocked.Decrement(ref _inFlight);
             _concurrency.Release();
         }
     }
