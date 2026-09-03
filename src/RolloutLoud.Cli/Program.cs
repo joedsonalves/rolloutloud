@@ -32,6 +32,7 @@ internal static class Program
             "identity" => Identity(paths, rest),
             "subagent" => await SubagentAsync(paths, rest).ConfigureAwait(false),
             "resume" => await ResumeAsync(paths, rest).ConfigureAwait(false),
+            "propose" => await ProposeAsync(paths, rest).ConfigureAwait(false),
             "ledger" => await LedgerAsync(paths, rest).ConfigureAwait(false),
             "status" => await StatusAsync(paths).ConfigureAwait(false),
             "mission" => await MissionAsync(paths, rest).ConfigureAwait(false),
@@ -466,6 +467,180 @@ internal static class Program
     }
 
     /// <summary>
+    /// Composes a mission for the operator to approve, and opens RolloutLoud if it is shut.
+    /// </summary>
+    /// <remarks>
+    /// The flow this exists for: the operator is in a CLI, says what they want in a sentence, and
+    /// asks the agent to set the mission up. The agent writes a sharper objective than a person
+    /// types in a hurry, and it knows the repository — which test actually proves the thing.
+    ///
+    /// It starts the window first, for the same reason <c>resume</c> does: "open RolloutLoud and
+    /// give it this objective" is one instruction from the operator, and turning it into two
+    /// commands in the right order is the tool asking them to remember its internals.
+    ///
+    /// ⚠️ <b>Nothing is created by this command.</b> It waits by default, because an agent that
+    /// fires and forgets leaves a draft on a desk nobody told the operator to look at, and then
+    /// reports the mission as set up. Blocking makes the handoff visible in the terminal the
+    /// operator is already looking at.
+    /// </remarks>
+    private static async Task<int> ProposeAsync(RolloutPaths paths, string[] args)
+    {
+        if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine(
+                "Usage: rollout propose \"<objective>\" [--gate \"<command>\"] [--why \"<reasoning>\"]\n" +
+                "                       [--agent <id>] [--scope a,b] [--auth \"<who authorised it>\"]\n" +
+                "                       [--offload always|threshold] [--max-attempts N] [--max-hours N]\n" +
+                "                       [--no-wait]\n\n" +
+                "The gate is a command that must exit 0, and it should RE-DERIVE the result — a test,\n" +
+                "a build, the scan run again. A gate that checks a file you wrote is you marking your\n" +
+                "own work, and RolloutLoud will say so to the operator.");
+            return 1;
+        }
+
+        if (RunningInstance.Detect(paths) is null)
+        {
+            var attached = await AttachAsync(paths, ["--quiet", .. args.Skip(1)]).ConfigureAwait(false);
+            if (attached != 0)
+            {
+                return attached;
+            }
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["objective"] = args[0],
+            ["agent"] = Option(args, "--agent"),
+            ["proposedBy"] = Option(args, "--agent") ?? "claude",
+            ["gateCommand"] = Option(args, "--gate"),
+            ["gateDescription"] = Option(args, "--gate-description"),
+            ["authorization"] = Option(args, "--auth"),
+            ["offload"] = Option(args, "--offload"),
+            ["rationale"] = Option(args, "--why"),
+        };
+
+        var scope = Option(args, "--scope");
+        if (!string.IsNullOrWhiteSpace(scope))
+        {
+            payload["scope"] = scope.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+
+        if (int.TryParse(Option(args, "--max-attempts"), out var attempts))
+        {
+            payload["maxAttempts"] = attempts;
+        }
+
+        if (double.TryParse(Option(args, "--max-hours"), out var hours))
+        {
+            payload["maxHours"] = hours;
+        }
+
+        var client = BridgeClient.Discover(paths);
+        if (client is null)
+        {
+            Console.Error.WriteLine($"No RolloutLoud running for {paths.RepositoryRoot}.");
+            return 1;
+        }
+
+        using (client)
+        {
+            string created;
+            try
+            {
+                created = await client.PostAsync("/v1/missions/proposals", payload).ConfigureAwait(false);
+            }
+            catch (HttpRequestException ex)
+            {
+                Console.Error.WriteLine($"Could not reach RolloutLoud at {client.Endpoint}: {ex.Message}");
+                return 1;
+            }
+
+            Console.WriteLine(created);
+
+            var id = FieldOf(created, "id");
+            if (args.Contains("--no-wait") || id is null)
+            {
+                return 0;
+            }
+
+            Console.Error.WriteLine(
+                $"Waiting for the operator to start or discard {id}. " +
+                "The proposal is on screen in the RolloutLoud window.");
+
+            return await AwaitDecisionAsync(client, id).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Blocks until the operator answers, then prints the answer.
+    /// </summary>
+    /// <remarks>
+    /// No deadline. The operator may well be making coffee, and a proposal that times out would
+    /// leave the agent reporting failure while the draft sits on screen waiting to be accepted —
+    /// the worst of both, since the operator then starts a mission whose agent has already given
+    /// up on it. Ctrl-C is the way out, and the proposal survives it.
+    ///
+    /// A rejected proposal exits 2 rather than 1: "the operator said no" and "the tool broke" are
+    /// different outcomes, and an agent scripting this needs to tell them apart.
+    /// </remarks>
+    private static async Task<int> AwaitDecisionAsync(BridgeClient client, string id)
+    {
+        while (true)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+
+            string body;
+            try
+            {
+                body = await client.GetAsync($"/v1/missions/proposals/{id}").ConfigureAwait(false);
+            }
+            catch (HttpRequestException)
+            {
+                Console.Error.WriteLine("RolloutLoud went away while the proposal was waiting.");
+                return 1;
+            }
+
+            switch (FieldOf(body, "state"))
+            {
+                case "pending":
+                    continue;
+
+                case "accepted":
+                    Console.WriteLine(body);
+                    return 0;
+
+                default:
+                    Console.WriteLine(body);
+                    return 2;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Pulls one top-level string out of a JSON response.
+    /// </summary>
+    /// <remarks>
+    /// Enough for two fields on a document this command just received from a server it started.
+    /// Deliberately not a typed contract shared with Core: the CLI is a thin client, and every
+    /// response shape it mirrors is one more thing that has to be changed in two places.
+    /// </remarks>
+    private static string? FieldOf(string json, string name)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty(name, out var value) &&
+                   value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Asks what has already been tried, filtered.
     /// </summary>
     /// <remarks>
@@ -670,6 +845,13 @@ internal static class Program
               rollout resume [--mission-id <id>] [--agent <id>]
                                              Pick a mission back up after the window was closed.
                                              Starts RolloutLoud first if it is not running.
+              rollout propose "<objective>" [--gate "<command>"] [--why "<reasoning>"]
+                                             [--agent <id>] [--scope a,b] [--auth "..."]
+                                             [--offload always|threshold] [--no-wait]
+                                             Compose a mission and hand it to the operator to
+                                             start. Opens RolloutLoud first if it is shut, then
+                                             waits for their answer. Nothing runs until they say
+                                             so — a gate you wrote for yourself is not a gate.
               rollout ledger ["<text>"] [--outcome ...] [--agent ...] [--tier N]
                                              [--since ...] [--limit N] [--full]
                                              What has already been tried. Filtered and paged —

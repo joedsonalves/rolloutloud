@@ -231,6 +231,37 @@ public sealed class BridgeServer : IAsyncDisposable
             return;
         }
 
+        // /v1/missions/proposals — matched before the generic /v1/missions/{id} route below, which
+        // would otherwise read "proposals" as a mission id and answer 404 with a hint about missions.
+        if (segments is ["v1", "missions", "proposals"])
+        {
+            if (method == "POST")
+            {
+                await ProposeMissionAsync(context).ConfigureAwait(false);
+                return;
+            }
+
+            await WriteAsync(context, HttpStatusCode.OK, _host.Proposals.Select(Describe)).ConfigureAwait(false);
+            return;
+        }
+
+        if (segments is ["v1", "missions", "proposals", var proposalId] && method == "GET")
+        {
+            var proposal = _host.FindProposal(proposalId);
+            if (proposal is null)
+            {
+                await WriteAsync(context, HttpStatusCode.NotFound, new ErrorResponse
+                {
+                    Error = "No such proposal.",
+                    Hint = "Proposals live in memory only; if RolloutLoud restarted, propose again.",
+                }).ConfigureAwait(false);
+                return;
+            }
+
+            await WriteAsync(context, HttpStatusCode.OK, Describe(proposal)).ConfigureAwait(false);
+            return;
+        }
+
         // /v1/missions ...
         if (segments is ["v1", "missions"])
         {
@@ -333,6 +364,141 @@ public sealed class BridgeServer : IAsyncDisposable
     /// Opens a mission from the bridge, so the whole flow can start from a CLI prompt rather than
     /// from the window: "install ROLLOUTLOUD and keep at X until Y" becomes one POST.
     /// </summary>
+    /// <summary>
+    /// An agent handing the operator a mission it wrote.
+    /// </summary>
+    /// <remarks>
+    /// The route the operator asked for: they type a sentence into a CLI, and the agent — better
+    /// at turning "make the flakiness stop" into a testable objective and a gate than a person
+    /// typing quickly — composes the whole thing.
+    ///
+    /// <b>It answers 202, never 201.</b> Nothing was created. Composing a mission means composing
+    /// its success gate, and an agent that writes its own finish line has taken back the one
+    /// decision this product exists to take away from it. So the reply is a receipt and a place to
+    /// poll, the window shows the operator what the gate actually tests, and the mission exists
+    /// only once they say so.
+    /// </remarks>
+    private async Task ProposeMissionAsync(HttpListenerContext context)
+    {
+        var body = await ReadAsync<ProposalRequest>(context).ConfigureAwait(false);
+        if (body is null || string.IsNullOrWhiteSpace(body.Objective))
+        {
+            await WriteAsync(context, HttpStatusCode.BadRequest, new ErrorResponse
+            {
+                Error = "'objective' is required.",
+                Hint = "Say the outcome you want, not the steps to it. Add 'gateCommand' for what proves it.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        var proposedBy = body.ProposedBy ?? body.Agent ?? Agents.AgentCatalog.Claude;
+        var agentId = body.Agent ?? proposedBy;
+
+        if (_host.FindAgent(agentId) is null)
+        {
+            await WriteAsync(context, HttpStatusCode.BadRequest, new ErrorResponse
+            {
+                Error = $"Unknown agent '{agentId}'.",
+                Hint = "Known: " + string.Join(", ", _host.Agents.Select(a => a.Id)),
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        var proposal = _host.Propose(new MissionProposal
+        {
+            Id = MissionProposal.NewId(),
+            Objective = body.Objective.Trim(),
+            ProposedBy = proposedBy,
+            AgentId = agentId,
+            GateCommand = body.GateCommand,
+            GateDescription = body.GateDescription,
+            Scope = body.Scope ?? [],
+            ScopeExclusions = body.ScopeExclusions ?? [],
+            Authorization = body.Authorization,
+            MaxAttempts = body.MaxAttempts,
+            MaxHours = body.MaxHours,
+            Offload = body.Offload,
+            Rationale = body.Rationale,
+            Review = new GateReview { Findings = [], Headline = string.Empty },
+        });
+
+        // The arrival itself is announced by whoever is watching RolloutHost.ProposalArrived, in
+        // the operator's language. Only the gate findings are logged here — they are the part
+        // nothing else says, and the part the operator has to see before clicking Start.
+        foreach (var finding in proposal.Review.Findings)
+        {
+            Logged?.Invoke($"⚠ Gate: {finding.Detail}");
+        }
+
+        await WriteAsync(context, HttpStatusCode.Accepted, Describe(proposal)).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// What a proposal looks like to the agent that made it.
+    /// </summary>
+    /// <remarks>
+    /// The critique goes back to the agent as well as to the operator, and that is the useful half:
+    /// an agent told "this passes as soon as a file exists" will re-propose with a real check
+    /// before the operator has finished reading the first one. Telling only the operator would make
+    /// the tool the reviewer of a draft it could have improved for free.
+    ///
+    /// The briefing rides along on acceptance for the same reason <c>resume</c> returns one: the
+    /// agent asked to start work, and what it needs next is what it would have asked for in its
+    /// very next call.
+    /// </remarks>
+    private object Describe(MissionProposal proposal)
+    {
+        var engine = proposal.MissionId is null ? null : _host.FindMission(proposal.MissionId);
+
+        return new
+        {
+            id = proposal.Id,
+            state = proposal.State.ToString().ToLowerInvariant(),
+            objective = proposal.Objective,
+            proposedBy = proposal.ProposedBy,
+            agent = proposal.AgentId,
+            gateCommand = proposal.GateCommand,
+            gateDescription = proposal.GateDescription,
+            scope = proposal.Scope,
+            authorization = proposal.Authorization,
+            rationale = proposal.Rationale,
+            createdAt = proposal.CreatedAt,
+            decidedAt = proposal.DecidedAt,
+            missionId = proposal.MissionId,
+            decision = proposal.Decision,
+            gateReview = new
+            {
+                headline = proposal.Review.Headline,
+                serious = proposal.Review.HasSeriousFinding,
+                findings = proposal.Review.Findings.Select(f => new
+                {
+                    weakness = f.Weakness.ToString(),
+                    concern = f.Concern.ToString(),
+                    detail = f.Detail,
+                    fragment = f.Fragment,
+                }),
+            },
+            warning = proposal.NeedsAuthorization
+                ? "Targets are declared but no authorisation is recorded. The operator will see this."
+                : null,
+            next = proposal.State switch
+            {
+                ProposalState.Pending =>
+                    "Waiting for the operator. Poll GET /v1/missions/proposals/" + proposal.Id +
+                    " — and if the gate review above found something, fix it and propose again " +
+                    "rather than waiting to be told.",
+                ProposalState.Accepted =>
+                    "Started. The briefing below is your mission; work it through the bridge as usual.",
+                ProposalState.Rejected =>
+                    "Turned down. Read 'decision', change what it names, and propose again.",
+                _ => "Replaced by a newer proposal from you. Follow that one instead.",
+            },
+            briefing = engine is null
+                ? null
+                : BriefingComposer.ForMainSession(engine.Mission, engine.Ledger, _host.HasAttachedIdentity),
+        };
+    }
+
     private async Task CreateMissionAsync(HttpListenerContext context)
     {
         var body = await ReadAsync<MissionRequest>(context).ConfigureAwait(false);
@@ -413,12 +579,36 @@ public sealed class BridgeServer : IAsyncDisposable
             Logged?.Invoke("⚠ Mission declares targets with no authorisation recorded.");
         }
 
+        // The critique runs here too, though this route starts the mission without asking. It is
+        // the older path and agents already use it, so leaving it uncritiqued would mean the check
+        // that matters most is the one an agent can skip by using the call it already knows. It
+        // cannot stop anything here — the mission is running — so it goes where the operator will
+        // actually come across it, which is the activity log.
+        var review = GateCritique.Review(gate);
+
+        foreach (var finding in review.Findings)
+        {
+            Logged?.Invoke($"⚠ Gate on {mission.Id}: {finding.Detail}");
+        }
+
         await WriteAsync(context, HttpStatusCode.Created, new
         {
             mission = engine.Mission,
             warning = scope.NeedsAuthorization
                 ? "Targets are declared but no authorisation is recorded. Fill in 'authorization' before running this against anything live."
                 : null,
+            gateReview = new
+            {
+                headline = review.Headline,
+                serious = review.HasSeriousFinding,
+                findings = review.Findings.Select(f => new
+                {
+                    weakness = f.Weakness.ToString(),
+                    concern = f.Concern.ToString(),
+                    detail = f.Detail,
+                    fragment = f.Fragment,
+                }),
+            },
             briefing = BriefingComposer.ForMainSession(engine.Mission, engine.Ledger, _host.HasAttachedIdentity),
         }).ConfigureAwait(false);
     }
