@@ -139,9 +139,9 @@
               <StackPanel Spacing="6" IsEnabled="{Binding OffloadEnabled}" Margin="20,0,0,0">
                 <RadioButton GroupName="offload" IsChecked="{Binding OffloadAlways}" Content="{loc:Tr Key=offload.always}" />
                 <RadioButton GroupName="offload" IsChecked="{Binding !OffloadAlways}" Content="{loc:Tr Key=offload.threshold}" />
-                <Grid ColumnDefinitions="Auto,120" ColumnSpacing="8" IsEnabled="{Binding !OffloadAlways}">
+                <Grid ColumnDefinitions="Auto,175" ColumnSpacing="8" IsEnabled="{Binding !OffloadAlways}">
                   <TextBlock Grid.Column="0" Text="{loc:Tr Key=offload.thresholdLabel}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
-                  <NumericUpDown Grid.Column="1" Value="{Binding TokenThreshold}" Increment="10000" Minimum="1000" Maximum="1000000" FormatString="0" />
+                  <NumericUpDown Grid.Column="1" MinWidth="175" Value="{Binding TokenThreshold}" Increment="10000" Minimum="1000" Maximum="1000000" FormatString="0" />
                 </Grid>
               </StackPanel>
             </StackPanel>
@@ -156,9 +156,9 @@
 
               <CheckBox IsChecked="{Binding WatchdogEnabled}" Content="{loc:Tr Key=watchdog.enable}" />
 
-              <Grid ColumnDefinitions="Auto,100" ColumnSpacing="8" IsEnabled="{Binding WatchdogEnabled}" Margin="20,0,0,0">
+              <Grid ColumnDefinitions="Auto,140" ColumnSpacing="8" IsEnabled="{Binding WatchdogEnabled}" Margin="20,0,0,0">
                 <TextBlock Grid.Column="0" Text="{loc:Tr Key=watchdog.roundLabel}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
-                <NumericUpDown Grid.Column="1" Value="{Binding WatchdogRoundMinutes}" Increment="1" Minimum="1" Maximum="120" FormatString="0" />
+                <NumericUpDown Grid.Column="1" MinWidth="140" Value="{Binding WatchdogRoundMinutes}" Increment="1" Minimum="1" Maximum="120" FormatString="0" />
               </Grid>
 
               <TextBlock Text="{Binding WatchdogStatus}" Classes="hint" />
@@ -170,11 +170,11 @@
             <StackPanel Spacing="8">
               <TextBlock Text="{loc:Tr Key=stop.title}" FontWeight="SemiBold" FontSize="13" />
               <TextBlock Text="{loc:Tr Key=stop.hint}" Classes="hint" />
-              <Grid ColumnDefinitions="Auto,110,Auto,110" ColumnSpacing="8">
+              <Grid ColumnDefinitions="Auto,150,Auto,140" ColumnSpacing="8">
                 <TextBlock Grid.Column="0" Text="{loc:Tr Key=stop.maxAttempts}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
-                <NumericUpDown Grid.Column="1" Value="{Binding MaxAttempts}" Minimum="1" Maximum="10000" Increment="10" FormatString="0" />
+                <NumericUpDown Grid.Column="1" MinWidth="150" Value="{Binding MaxAttempts}" Minimum="1" Maximum="10000" Increment="10" FormatString="0" />
                 <TextBlock Grid.Column="2" Text="{loc:Tr Key=stop.maxHours}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" Margin="12,0,0,0" />
-                <NumericUpDown Grid.Column="3" Value="{Binding MaxHours}" Minimum="0.1" Maximum="72" Increment="0.5" FormatString="0.0" />
+                <NumericUpDown Grid.Column="3" MinWidth="140" Value="{Binding MaxHours}" Minimum="0.1" Maximum="72" Increment="0.5" FormatString="0.0" />
               </Grid>
             </StackPanel>
           </Border>
