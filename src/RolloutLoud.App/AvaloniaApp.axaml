@@ -1,11 +1,15 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="RolloutLoud.App.AvaloniaApp"
-             RequestedThemeVariant="Default">
+             RequestedThemeVariant="Dark">
 
-  <!-- Default, not Dark: the window follows whatever the OS is set to. Every colour below is
-       defined in BOTH variants, so nothing falls back to a Fluent default that happens to be
-       unreadable on the other side. -->
+  <!-- Dark is the shipped default, and that is a decision rather than a fallback: this window
+       sits between terminal windows all day, and following the OS means most people's first sight
+       of it is a bright panel between two dark ones. The header has a toggle, and the choice is
+       remembered per USER rather than per repository.
+
+       Every colour below is defined in BOTH variants, so nothing falls back to a Fluent default
+       that happens to be unreadable on the other side. -->
   <Application.Resources>
     <ResourceDictionary>
       <ResourceDictionary.ThemeDictionaries>
