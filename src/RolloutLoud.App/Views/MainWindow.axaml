@@ -4,6 +4,7 @@
         x:Class="RolloutLoud.App.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="RolloutLoud"
+        Icon="avares://RolloutLoud/Assets/rolloutloud.ico"
         Width="1320" Height="880"
         MinWidth="1040" MinHeight="640"
         Background="#151517">
