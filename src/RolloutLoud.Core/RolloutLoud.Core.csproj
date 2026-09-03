@@ -6,4 +6,19 @@
     <RootNamespace>RolloutLoud.Core</RootNamespace>
   </PropertyGroup>
 
+  <!-- WithCulture="false" and an explicit LogicalName are both load-bearing.
+
+       `Strings.en.json` matches MSBuild's name.culture.extension pattern (`en` is a real culture),
+       so by default it is compiled into a SATELLITE ASSEMBLY rather than into this one. The build
+       succeeds, nothing warns, GetManifestResourceStream returns null at run time, and every
+       label in the window renders as [key]. Vacuon hit this exact failure and it cost a debugging
+       session, because there is no error anywhere in the chain.
+
+       LocalizationTests fails if any of the three tables stops loading. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Localization\Strings.en.json" WithCulture="false" LogicalName="RolloutLoud.Core.Strings.en.json" />
+    <EmbeddedResource Include="Localization\Strings.pt.json" WithCulture="false" LogicalName="RolloutLoud.Core.Strings.pt.json" />
+    <EmbeddedResource Include="Localization\Strings.es.json" WithCulture="false" LogicalName="RolloutLoud.Core.Strings.es.json" />
+  </ItemGroup>
+
 </Project>

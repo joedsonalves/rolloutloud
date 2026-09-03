@@ -28,6 +28,12 @@ public sealed class RolloutPaths
     public string AllowlistFile => Path.Combine(StateRoot, "allowlist.json");
     public string BridgeHandshakeFile => Path.Combine(StateRoot, "bridge.json");
     public string AgentsFile => Path.Combine(StateRoot, "agents.json");
+
+    /// <summary>Details the operator has lent to agents. Absent by default, and absence means no.</summary>
+    public string IdentityFile => Path.Combine(StateRoot, "identity.json");
+
+    /// <summary>Every time an agent was handed the identity, and for which site.</summary>
+    public string IdentityAuditFile => Path.Combine(StateRoot, "identity-access.log");
     public string VaultDirectory => Path.Combine(RepositoryRoot, "ROLLOUTLOUD-Vault");
 
     public string MissionFile(string missionId) => Path.Combine(MissionsDirectory, missionId + ".json");

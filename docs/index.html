@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RolloutLoud — keep the agent working until the gate says stop</title>
+<meta name="description" content="Drives Claude Code, Codex, Hermes and OpenClaw: a verifiable finish line the agent cannot declare for itself, a ledger that stops it repeating, and a way to ask for the commands it cannot run.">
+
+<!--
+  These three lines are why this page exists at all.
+
+  winstall.app puts an icon next to a package by running get-website-favicon against the
+  manifest's PackageUrl and keeping the highest-resolution favicon it finds. Point PackageUrl at
+  a GitHub repository page and it scrapes GitHub's own favicon and shows the default grey square.
+  Point it here and it gets the app icon.
+
+  The two image files are copied in by assets/generate-icon.ps1, never by hand: GitHub Pages only
+  serves what is inside the published folder, so ../assets/ does not resolve, and a hand-made
+  copy would become a second truth about the drawing.
+-->
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="256x256" href="rolloutloud-256.png">
+<link rel="apple-touch-icon" href="rolloutloud-256.png">
+<meta name="theme-color" content="#0A0C14">
+
+<meta property="og:title" content="RolloutLoud">
+<meta property="og:description" content="Keep the agent working until the gate says stop.">
+<meta property="og:image" content="rolloutloud-256.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #16181d;
+    --muted: #5b6070;
+    --line: #e2e4ea;
+    --card: #f6f7f9;
+    --code-bg: #f0f1f4;
+    --accent: #2f6df0;
+    --cyan: #0891b2;
+    --indigo: #4f46e5;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0A0C14;
+      --fg: #e8eaf0;
+      --muted: #949aab;
+      --line: #23273a;
+      --card: #12151f;
+      --code-bg: #0f1219;
+      --accent: #7aa2ff;
+      --cyan: #22d3ee;
+      --indigo: #8176f5;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 780px; margin: 0 auto; padding: 0 24px 96px; }
+
+  header { padding: 72px 0 40px; }
+
+  .brand { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+  .brand img { width: 56px; height: 56px; border-radius: 12px; }
+  .brand h1 {
+    margin: 0; font-size: 28px; letter-spacing: 0.14em; font-weight: 700;
+  }
+
+  .tagline { font-size: 22px; line-height: 1.4; margin: 0 0 16px; font-weight: 600; }
+  .lede { font-size: 17px; color: var(--muted); margin: 0 0 28px; }
+
+  .cta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .cta a {
+    display: inline-block; padding: 10px 18px; border-radius: 8px;
+    text-decoration: none; font-weight: 600; font-size: 15px;
+    border: 1px solid var(--line); color: var(--fg);
+  }
+  .cta a.primary {
+    background: linear-gradient(135deg, var(--cyan), var(--indigo));
+    border-color: transparent; color: #fff;
+  }
+
+  h2 { font-size: 20px; margin: 44px 0 12px; }
+
+  blockquote {
+    margin: 24px 0; padding: 16px 20px; border-left: 3px solid var(--indigo);
+    background: var(--card); border-radius: 0 8px 8px 0;
+  }
+  blockquote p { margin: 0; font-size: 17px; font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+  }
+  code { font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace; }
+  p code, li code, td code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+
+  .warn {
+    border-left: 3px solid #d9822b; background: var(--card);
+    padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 20px 0; font-size: 15px;
+  }
+
+  footer {
+    border-top: 1px solid var(--line); margin-top: 56px; padding-top: 20px;
+    color: var(--muted); font-size: 14px;
+  }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="brand">
+    <img src="rolloutloud-256.png" alt="RolloutLoud icon">
+    <h1>ROLLOUTLOUD</h1>
+  </div>
+
+  <p class="tagline">Keep the agent working until the gate says stop.</p>
+
+  <p class="lede">
+    Drives Claude Code, Codex, Hermes and OpenClaw. It gives them an objective with a finish line
+    they cannot declare for themselves, a ledger that stops them repeating one idea, and a way to
+    ask for the privileged commands they cannot run.
+  </p>
+
+  <div class="cta">
+    <a class="primary" href="https://github.com/joedsonalves/rolloutloud">Source on GitHub</a>
+    <a href="https://github.com/joedsonalves/rolloutloud/blob/main/docs/BRIDGE.md">Bridge contract</a>
+  </div>
+</header>
+
+<h2>The problem</h2>
+
+<p>
+  Ask a CLI agent to <em>"make the integration suite pass on Windows, not just on my
+  machine"</em> and it tries three things, the third fails, and it comes back with <em>"I was
+  unable to get the suite green. Let me know if you'd like me to try another approach."</em>
+</p>
+
+<p>
+  That is not a capability problem. It is a question of <strong>who decides it is finished</strong>
+  — and there are four separate reasons behind it, so there are four separate answers.
+</p>
+
+<table>
+  <tr><th>Reason</th><th>What RolloutLoud does</th></tr>
+  <tr><td>The agent judges its own success</td><td>A success gate the tool evaluates, twice</td></tr>
+  <tr><td>It forgets what it tried</td><td>A ledger with attempt fingerprints</td></tr>
+  <tr><td>It runs out of <em>kinds</em> of idea, not ideas</td><td>An escalation ladder</td></tr>
+  <tr><td>A long context makes each action expensive</td><td>Subagent offload</td></tr>
+</table>
+
+<h2>The one rule</h2>
+
+<blockquote><p>The agent never decides on its own that it is done.</p></blockquote>
+
+<p>
+  A mission carries a success gate: a command whose exit code ends the run. The agent cannot
+  declare victory — it produces evidence and asks the gate. And a satisfied gate is
+  <strong>run a second time, from a clean process</strong>, before it is believed: an agent that
+  has been grinding for two hours writes a confident summary of a fix that does not hold, and
+  that summary reads exactly like a real one.
+</p>
+
+<h2>Install</h2>
+
+<pre><code>winget install Joedsonalves.RolloutLoud</code></pre>
+
+<p>Or build it yourself:</p>
+
+<pre><code>git clone https://github.com/joedsonalves/rolloutloud
+cd rolloutloud
+dotnet build
+dotnet run --project src/RolloutLoud.App</code></pre>
+
+<p>
+  <strong>The folder you run it from is the anchor.</strong> Every elevated CLI and every fluid
+  button opens there.
+</p>
+
+<h2>Elevation, without bypassing anything</h2>
+
+<p>
+  RolloutLoud does not bypass UAC. It becomes the <strong>broker</strong>: you elevate it once,
+  consenting once, and from then on every process it starts inherits that token with no further
+  prompt — including the fluid buttons an agent invokes itself.
+</p>
+
+<div class="warn">
+  <strong>A child never holds more privilege than its parent.</strong> Clicking an elevated button
+  from an unelevated RolloutLoud starts the CLI with its bypass flag but <em>without</em>
+  administrative rights, and the difference only shows up an hour later when a privileged command
+  fails. That is why the warning has three answers, not two.
+</div>
+
+<h2>Scope</h2>
+
+<p>
+  Most missions are local work and need no boundary at all. Scope exists for the case where an
+  agent is pointed at something outside the machine and the boundary has to hold — a staging
+  environment that must not leak into production, a migration that may touch one database and not
+  the one beside it, a deployment that is allowed one cluster and no others.
+</p>
+
+<p>
+  There the mission carries the boundary, and it is enforced on every command the agent declares —
+  not advice in a prompt that competes with two hours of frustration. Out-of-scope commands are
+  refused before they run, and the refusal goes into the ledger with its reason, so the agent
+  learns the edge instead of hammering it.
+</p>
+
+<div class="warn">
+  <strong>This is a guard rail, not a sandbox.</strong> It reads the command the agent
+  <em>declared</em>. An agent running unsupervised in an elevated terminal can always reach past
+  it. It exists to stop honest drift — and that is why authorisation is required whenever targets
+  are declared: the run has to be attributable afterwards.
+</div>
+
+<footer>
+  MIT licensed · <a href="https://github.com/joedsonalves/rolloutloud">github.com/joedsonalves/rolloutloud</a>
+</footer>
+
+</div>
+</body>
+</html>

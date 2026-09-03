@@ -1,0 +1,288 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:RolloutLoud.App.Views"
+        xmlns:loc="clr-namespace:RolloutLoud.App.Views"
+        x:Class="RolloutLoud.App.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="RolloutLoud"
+        Icon="avares://RolloutLoud/Assets/rolloutloud.ico"
+        Width="1320" Height="900"
+        MinWidth="1040" MinHeight="640"
+        Background="{DynamicResource RlWindow}">
+
+  <Grid RowDefinitions="Auto,*">
+
+    <!-- Header: the anchor, the bridge, and whether we are elevated. All three are things the
+         operator has to be able to check without opening a menu. -->
+    <Border Grid.Row="0" Background="{DynamicResource RlHeader}" Padding="18,14"
+            BorderBrush="{DynamicResource RlBorder}" BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Grid.Column="0" Spacing="3">
+          <TextBlock Text="ROLLOUTLOUD" FontSize="16" FontWeight="Bold" LetterSpacing="2" />
+          <TextBlock Text="{Binding RepositoryRoot}" FontSize="11" Opacity="0.6" TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{Binding BridgeHint}" FontSize="11" Opacity="0.45" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <StackPanel Spacing="2" HorizontalAlignment="Right">
+            <TextBlock Text="{Binding ElevationBadge}" FontSize="12" FontWeight="Bold" HorizontalAlignment="Right" />
+            <TextBlock Text="{Binding ElevationDetail}" Classes="hint" MaxWidth="380" TextAlignment="Right" />
+          </StackPanel>
+          <Button Command="{Binding ToggleTheme}" ToolTip.Tip="{Binding ThemeTooltip}"
+                  Padding="11,7" VerticalAlignment="Center">
+            <!-- A path, not a text glyph: ☀ and ☽ resolve to different fonts in the fallback
+                 chain and are drawn at different weights, so the moon came out as a hairline
+                 next to a solid sun. -->
+            <PathIcon Data="{Binding ThemeGeometry}" Width="18" Height="18"
+                      Foreground="{DynamicResource RlText}" />
+          </Button>
+          <Button Content="{loc:Tr Key=app.elevate}" Command="{Binding Elevate}" Padding="14,8"
+                  IsVisible="{Binding !IsElevated}" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="300,*,360" Margin="14">
+
+      <!-- ================= Left: the CLIs ================= -->
+      <ScrollViewer Grid.Column="0" Margin="0,0,12,0">
+        <StackPanel>
+          <TextBlock Text="{loc:Tr Key=agents.title}" Classes="section" />
+          <TextBlock Text="{loc:Tr Key=agents.hint}" Classes="hint" Margin="0,0,0,12" />
+
+          <ItemsControl ItemsSource="{Binding Agents}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:AgentLauncher">
+                <Border Classes="card">
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13" />
+                    <Button Classes="launch" Command="{Binding LaunchNormal}">
+                      <StackPanel>
+                        <TextBlock Text="{loc:Tr Key=agents.launch}" FontSize="12" />
+                        <TextBlock Text="{Binding NormalCommandLine}" Classes="hint mono" />
+                      </StackPanel>
+                    </Button>
+                    <Button Classes="launch elevated" Command="{Binding LaunchElevated}">
+                      <StackPanel>
+                        <TextBlock Text="{loc:Tr Key=agents.launchElevated}" FontSize="12" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding ElevatedCommandLine}" Classes="hint mono" />
+                      </StackPanel>
+                    </Button>
+                    <TextBlock Text="{Binding Notes}" Classes="hint"
+                               IsVisible="{Binding Notes, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <Button Content="{loc:Tr Key=agents.writeConfig}" Command="{Binding OpenAllowlist}"
+                  HorizontalAlignment="Stretch" Margin="0,8,0,0" Padding="10,8" />
+          <TextBlock Text="{loc:Tr Key=agents.writeConfig.hint}" Classes="hint" Margin="0,6,0,0" />
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- ================= Centre: the mission ================= -->
+      <ScrollViewer Grid.Column="1" Margin="0,0,12,0">
+        <StackPanel>
+          <TextBlock Text="{loc:Tr Key=mission.title}" Classes="section" />
+
+          <!-- Several agents work in this window at once, one mission each. Which row is selected
+               decides what "active" means to an agent that calls the bridge without naming one. -->
+          <Border Classes="card" IsVisible="{Binding OpenMissions.Count}">
+            <StackPanel Spacing="6">
+              <TextBlock Text="{loc:Tr Key=mission.open}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{loc:Tr Key=mission.open.hint}" Classes="hint" />
+              <ComboBox ItemsSource="{Binding OpenMissions}" SelectedItem="{Binding SelectedMission}"
+                        HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:MissionSummaryItem">
+                    <TextBlock Text="{Binding Label}" FontSize="12" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+            </StackPanel>
+          </Border>
+
+          <Border Classes="card">
+            <StackPanel Spacing="10">
+              <TextBlock Text="{loc:Tr Key=mission.hint}" Classes="hint" />
+
+              <TextBox Text="{Binding Objective}"
+                       AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90"
+                       PlaceholderText="{loc:Tr Key=mission.placeholder}" />
+
+              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                <TextBlock Grid.Column="0" Text="{loc:Tr Key=mission.runOn}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
+                <ComboBox Grid.Column="1" ItemsSource="{Binding AgentIds}"
+                          SelectedItem="{Binding SelectedAgentId}" HorizontalAlignment="Stretch" />
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <!-- The gate. This is the part that makes "until" mean something. -->
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{loc:Tr Key=gate.title}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{loc:Tr Key=gate.hint}" Classes="hint" />
+
+              <TextBox Text="{Binding GateDescription}" PlaceholderText="{loc:Tr Key=gate.description.placeholder}" />
+
+              <CheckBox IsChecked="{Binding GateIsCommand}" Content="{loc:Tr Key=gate.useCommand}" />
+              <TextBox Text="{Binding GateCommand}" IsEnabled="{Binding GateIsCommand}"
+                       FontFamily="Consolas,Menlo,monospace"
+                       PlaceholderText="{loc:Tr Key=gate.command.placeholder}" />
+            </StackPanel>
+          </Border>
+
+          <!-- Scope. Enforced on every command the agent declares. -->
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{loc:Tr Key=scope.title}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{loc:Tr Key=scope.hint}" Classes="hint" />
+
+              <TextBox Text="{Binding ScopeTargets}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="52"
+                       FontFamily="Consolas,Menlo,monospace"
+                       PlaceholderText="{loc:Tr Key=scope.targets.placeholder}" />
+
+              <TextBox Text="{Binding ScopeAuthorization}" PlaceholderText="{loc:Tr Key=scope.auth.placeholder}" />
+
+              <TextBlock Text="{Binding ScopeWarning}" Foreground="{DynamicResource RlWarning}"
+                         FontSize="11" TextWrapping="Wrap"
+                         IsVisible="{Binding ScopeWarning, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+          </Border>
+
+          <!-- Subagent offload. -->
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{loc:Tr Key=offload.title}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{loc:Tr Key=offload.hint}" Classes="hint" />
+
+              <CheckBox IsChecked="{Binding OffloadEnabled}" Content="{loc:Tr Key=offload.enable}" />
+
+              <StackPanel Spacing="6" IsEnabled="{Binding OffloadEnabled}" Margin="20,0,0,0">
+                <RadioButton GroupName="offload" IsChecked="{Binding OffloadAlways}" Content="{loc:Tr Key=offload.always}" />
+                <RadioButton GroupName="offload" IsChecked="{Binding !OffloadAlways}" Content="{loc:Tr Key=offload.threshold}" />
+                <Grid ColumnDefinitions="Auto,175" ColumnSpacing="8" IsEnabled="{Binding !OffloadAlways}">
+                  <TextBlock Grid.Column="0" Text="{loc:Tr Key=offload.thresholdLabel}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
+                  <NumericUpDown Grid.Column="1" MinWidth="175" Value="{Binding TokenThreshold}" Increment="10000" Minimum="1000" Maximum="1000000" FormatString="0" />
+                </Grid>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- The watchdog. An agent stopping early is the failure this whole product exists
+               for, and this is the part that refuses to accept it. -->
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{loc:Tr Key=watchdog.title}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{loc:Tr Key=watchdog.hint}" Classes="hint" />
+
+              <CheckBox IsChecked="{Binding WatchdogEnabled}" Content="{loc:Tr Key=watchdog.enable}" />
+
+              <Grid ColumnDefinitions="Auto,140" ColumnSpacing="8" IsEnabled="{Binding WatchdogEnabled}" Margin="20,0,0,0">
+                <TextBlock Grid.Column="0" Text="{loc:Tr Key=watchdog.roundLabel}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
+                <NumericUpDown Grid.Column="1" MinWidth="140" Value="{Binding WatchdogRoundMinutes}" Increment="1" Minimum="1" Maximum="120" FormatString="0" />
+              </Grid>
+
+              <TextBlock Text="{Binding WatchdogStatus}" Classes="hint" />
+            </StackPanel>
+          </Border>
+
+          <!-- An agent can ask to close the window when it is finished. The request is judged on
+               MissionState, which only a twice-passed gate can set to Achieved — so "I could not
+               do it" arrives as Exhausted and is refused. -->
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{loc:Tr Key=shutdown.title}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{loc:Tr Key=shutdown.hint}" Classes="hint" />
+              <CheckBox IsChecked="{Binding AllowUnattendedShutdown}" Content="{loc:Tr Key=shutdown.unattended}" />
+              <TextBlock Text="{loc:Tr Key=shutdown.unattended.hint}" Classes="hint" Margin="20,0,0,0" />
+            </StackPanel>
+          </Border>
+
+          <!-- The brakes. -->
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{loc:Tr Key=stop.title}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{loc:Tr Key=stop.hint}" Classes="hint" />
+              <Grid ColumnDefinitions="Auto,150,Auto,140" ColumnSpacing="8">
+                <TextBlock Grid.Column="0" Text="{loc:Tr Key=stop.maxAttempts}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
+                <NumericUpDown Grid.Column="1" MinWidth="150" Value="{Binding MaxAttempts}" Minimum="1" Maximum="10000" Increment="10" FormatString="0" />
+                <TextBlock Grid.Column="2" Text="{loc:Tr Key=stop.maxHours}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" Margin="12,0,0,0" />
+                <NumericUpDown Grid.Column="3" MinWidth="140" Value="{Binding MaxHours}" Minimum="0.1" Maximum="72" Increment="0.5" FormatString="0.0" />
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <WrapPanel Margin="0,4,0,10">
+            <Button Content="{loc:Tr Key=action.start}" Command="{Binding StartMission}" Padding="18,10" FontWeight="SemiBold" Margin="0,0,8,8" />
+            <Button Content="{Binding PauseLabel}" Command="{Binding PauseMission}" Padding="14,10" Margin="0,0,8,8" />
+            <Button Content="{loc:Tr Key=action.checkGate}" Command="{Binding CheckGate}" Padding="14,10" Margin="0,0,8,8" />
+            <Button Content="{Binding SuperviseLabel}" Command="{Binding ToggleSupervision}" Padding="14,10" Margin="0,0,8,8" />
+            <Button Content="{loc:Tr Key=action.abort}" Command="{Binding AbortMission}" Padding="14,10" Margin="0,0,8,8" />
+          </WrapPanel>
+
+          <TextBlock Text="{Binding MissionSummary}" Classes="hint" Margin="0,0,0,10" />
+
+          <TextBlock Text="{loc:Tr Key=ledger.title}" Classes="section" />
+          <TextBlock Text="{loc:Tr Key=ledger.hint}" Classes="hint" Margin="0,0,0,6" />
+          <Border Classes="card" MinHeight="120">
+            <ItemsControl ItemsSource="{Binding Ledger}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,5" Opacity="0.8" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- ================= Right: fluid buttons + activity ================= -->
+      <Grid Grid.Column="2" RowDefinitions="Auto,2*,Auto,*">
+        <StackPanel Grid.Row="0">
+          <TextBlock Text="{loc:Tr Key=buttons.title}" Classes="section" />
+          <TextBlock Text="{loc:Tr Key=buttons.hint}" Classes="hint" Margin="0,0,0,8" />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1">
+          <ItemsControl ItemsSource="{Binding Buttons}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ButtonCard">
+                <Border Classes="card">
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding Rationale}" Classes="hint" />
+                    <Border Background="{DynamicResource RlSurfaceSunken}" CornerRadius="4" Padding="8">
+                      <TextBlock Text="{Binding Command}" Classes="mono" FontSize="11" TextWrapping="Wrap" />
+                    </Border>
+                    <TextBlock Text="{Binding StatusLine}" Classes="hint" />
+                    <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding IsOpen}">
+                      <Button Content="{loc:Tr Key=buttons.run}" Command="{Binding Run}" Padding="14,6" />
+                      <Button Content="{loc:Tr Key=buttons.dismiss}" Command="{Binding Dismiss}" Padding="14,6" />
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+
+        <TextBlock Grid.Row="2" Text="{loc:Tr Key=activity.title}" Classes="section" Margin="0,12,0,8" />
+
+        <ScrollViewer Grid.Row="3">
+          <ItemsControl ItemsSource="{Binding Activity}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding}" FontSize="11" Classes="mono"
+                           TextWrapping="Wrap" Opacity="0.7" Margin="0,0,0,3" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Grid>
+    </Grid>
+  </Grid>
+</Window>

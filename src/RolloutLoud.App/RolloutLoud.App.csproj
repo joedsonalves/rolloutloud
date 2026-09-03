@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>RolloutLoud.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>RolloutLoud</AssemblyName>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ApplicationIcon>..\..\assets\rolloutloud.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- One drawing, one generator. The same .ico is the executable's shell icon and the window
+       icon, and assets/generate-icon.ps1 also copies it into docs/ for the Pages site — which is
+       what puts the icon next to the package in the winget catalogues. -->
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\assets\rolloutloud.ico" Link="Assets\rolloutloud.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RolloutLoud.Core\RolloutLoud.Core.csproj" />
+    <ProjectReference Include="..\RolloutLoud.Platform.Unix\RolloutLoud.Platform.Unix.csproj" />
+    <ProjectReference Include="..\RolloutLoud.Platform.Windows\RolloutLoud.Platform.Windows.csproj" />
+  </ItemGroup>
+
+</Project>

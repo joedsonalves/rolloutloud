@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>RolloutLoud.Cli</RootNamespace>
+
+    <!-- Lowercase, and NOT the same name as the GUI: on a case-insensitive filesystem
+         `rollout.exe` and `RolloutLoud.exe` can live side by side, but two things both called
+         `rolloutloud.exe` cannot. -->
+    <AssemblyName>rollout</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RolloutLoud.Core\RolloutLoud.Core.csproj" />
+  </ItemGroup>
+
+</Project>

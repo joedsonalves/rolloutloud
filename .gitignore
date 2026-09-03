@@ -17,15 +17,21 @@ runs/
 /ROLLOUTLOUD-Vault/
 .obsidian/
 
-# Working context.
+# Working context — the rules, the brief and the brain.
 #
-# The agent instruction files are git-ignored for a reason that is not obvious: RolloutLoud
-# rewrites a block inside each of them on every launch, and that block carries the live mission —
-# including the engagement scope and its target list. Committing them would publish the scope of
-# whatever was last worked on.
+# Two different reasons, both worth stating.
+#
+# The *.local.md files and the per-agent instruction files hold a block RolloutLoud rewrites on
+# every launch, and that block carries the live mission — including the engagement scope and its
+# target list. Committing them would publish the scope of whatever was last worked on.
+#
+# CLAUDE.md and PRD.md are not rewritten; they are ignored because they are working context
+# rather than product, the same call VACUON made. Consequence that has to be said out loud:
+# neither they nor the vault have a GitHub backup.
 CLAUDE.md
 CLAUDE.local.md
 AGENTS.md
+AGENTS.local.md
 HERMES.md
 OPENCLAW.md
 PRD.md
