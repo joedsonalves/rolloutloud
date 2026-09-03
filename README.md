@@ -91,7 +91,19 @@ underneath them RolloutLoud's reading of the gate:
 | `grep -q CRITICAL findings.json` | the same, with a coat of diligence on |
 | anything under `.rolloutloud/` | the agent wrote those records; the gate would ask it |
 | `claude -p "is this good?"` | a model's opinion, which is what the gate replaces |
+| `dotnet test --filter NewTests` | a filter matching nothing exits 0, so it is green before the test exists |
 | `dotnet test tests/Checkout` | nothing to flag — it re-derives the result |
+
+⚠️ **The `--filter` one is the one that catches people, including me.**
+`dotnet test --filter NewTests` is exactly the right-looking finish line for a mission whose job is
+to *write* `NewTests` — and it exits 0 today, because a filter matching nothing is not an error to
+the runner. Gate satisfied, re-verified from a clean process, satisfied again, mission Achieved,
+nothing done. Adding `-- RunConfiguration.TreatNoTestsAsError=true` makes it exit 1 until the test
+really exists, and the warning goes away.
+
+That one is checked for `dotnet test` and nothing else, because the behaviour was **measured**
+rather than assumed: `dotnet test --filter NoSuchThing` exits 0, while `pytest -k NoSuchThing`
+exits 5. Warning about every filtered test run would cry wolf at pytest in order to catch dotnet.
 
 Fix the gate in the box and press **Start mission**; what runs is what you left there. The agent
 gets the briefing back on the same call it was blocked on, and starts work. **Discard** sends the

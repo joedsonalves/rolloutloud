@@ -149,6 +149,7 @@ It is looking for the gate that ends the run without proving anything:
 | `grep -q CRITICAL findings.json` | the same, with a coat of diligence on |
 | anything under `.rolloutloud/` | you wrote those records; the gate would ask you |
 | `claude -p "is this good?"` | a model's opinion, which is what the gate replaces |
+| `dotnet test --filter NewTests` | a filter matching nothing exits 0 — green before the test exists |
 
 A gate that **re-derives** the result is what you want: a test, a build, the scan run again. Text
 piped from a tool is fine — `nuclei -u … \| grep -q critical` reads what a scanner just produced,

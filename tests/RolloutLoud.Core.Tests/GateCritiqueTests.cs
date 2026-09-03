@@ -46,6 +46,61 @@ public class GateCritiqueTests
         Assert.False(Flags("echo probing && curl -fsS https://target/health", GateWeakness.CannotFail));
     }
 
+    // ---- the gate that is already green because it selects nothing ---------------------------
+
+    [Fact]
+    public void A_test_filter_naming_something_that_does_not_exist_yet_is_caught()
+    {
+        // The sharpest "already satisfied", hiding inside the most respectable gate there is.
+        // `dotnet test --filter CheckoutFlakeTests` reads as exactly the right finish line for a
+        // mission whose job is to WRITE CheckoutFlakeTests — and it exits 0 today, because a filter
+        // matching nothing is not an error to the runner. Gate satisfied, re-verified, satisfied
+        // again, mission Achieved, no work done.
+        var review = Of("dotnet test tests/Unit --filter CheckoutFlakeTests");
+
+        Assert.Contains(review.Findings, f => f.Weakness == GateWeakness.PassesOnNothing);
+        Assert.True(review.HasSeriousFinding);
+        Assert.Contains("TreatNoTestsAsError", review.Headline, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_flag_that_fixes_it_makes_the_warning_go_away()
+    {
+        // With it, "nothing matched" exits 1 and the gate is exactly right — so there is nothing
+        // left to say, and saying something anyway is how a checker gets clicked past.
+        var review = Of(
+            "dotnet test tests/Unit --filter CheckoutFlakeTests -- RunConfiguration.TreatNoTestsAsError=true");
+
+        Assert.Empty(review.Findings);
+    }
+
+    [Fact]
+    public void Pytest_is_left_alone_because_it_already_fails_on_an_empty_filter()
+    {
+        // ⚠️ Measured rather than assumed, and the measurement is the reason this check is narrow:
+        // `dotnet test --filter NoSuchThing` exits 0, `pytest -k NoSuchThing` exits 5. The
+        // behaviour is per-runner, so warning about every filtered test run would cry wolf at
+        // pytest in order to catch dotnet.
+        Assert.Empty(Of("pytest -k CheckoutFlakeTests").Findings);
+        Assert.Empty(Of("pytest -q tests/regression -k flake").Findings);
+    }
+
+    [Fact]
+    public void An_unfiltered_dotnet_test_is_not_flagged()
+    {
+        Assert.Empty(Of("dotnet test tests/RolloutLoud.Core.Tests").Findings);
+    }
+
+    [Fact]
+    public void A_word_that_merely_contains_test_or_filter_is_not_mistaken_for_one()
+    {
+        // ⚠️ A substring check reads "dotnet build --no-restore" as containing "test" via "latest",
+        // and "--filter-none" as "--filter". Both would be false positives on a warning the
+        // operator is meant to take seriously.
+        Assert.Empty(Of("dotnet build src/App -c Release --property:Version=1.0-latest").Findings);
+        Assert.Empty(Of("dotnet test tests/Unit --filter-none").Findings);
+    }
+
     // ---- the gate the agent satisfies by writing a file -------------------------------------
 
     [Theory]
