@@ -45,6 +45,7 @@ public sealed class BridgeServer : IAsyncDisposable
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _shutdown = new();
     private readonly SemaphoreSlim _serialize = new(1, 1);
+    private readonly Offload.SubagentRunner _subagents;
     private Task? _loop;
 
     public BridgeServer(RolloutHost host, int port = 0)
@@ -54,6 +55,9 @@ public sealed class BridgeServer : IAsyncDisposable
         Token = GenerateToken();
         Endpoint = $"http://127.0.0.1:{Port}";
         _listener.Prefixes.Add(Endpoint + "/");
+
+        _subagents = new Offload.SubagentRunner(host, host.Paths);
+        _subagents.Logged += message => Logged?.Invoke(message);
     }
 
     public int Port { get; }
@@ -281,6 +285,10 @@ public sealed class BridgeServer : IAsyncDisposable
 
                 case ("relay", "POST"):
                     await RelayAsync(context, engine).ConfigureAwait(false);
+                    return;
+
+                case ("subagent", "POST"):
+                    await SubagentAsync(context, engine).ConfigureAwait(false);
                     return;
             }
         }
@@ -632,6 +640,67 @@ public sealed class BridgeServer : IAsyncDisposable
                 reason = disclosure.Reason,
                 fields = disclosure.Granted ? disclosure.Fields : null,
             }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs one step in a fresh process and returns a few lines rather than a transcript.
+    /// </summary>
+    /// <remarks>
+    /// The division of labour is the feature. RolloutLoud has no model and cannot decide what to
+    /// try next; the caller supplies the task, because that is where the judgement lives. What
+    /// happens here is everything around the decision — a clean process, the mission and ledger
+    /// composed into a short briefing, the transcript on disk, the verdict parsed and filed, and
+    /// a compact answer coming back.
+    ///
+    /// The response deliberately carries the verdict and not the output. Returning the transcript
+    /// would move the context cost rather than remove it, which is the whole reason for the
+    /// endpoint.
+    /// </remarks>
+    private async Task SubagentAsync(HttpListenerContext context, MissionEngine engine)
+    {
+        var body = await ReadAsync<SubagentRequest>(context).ConfigureAwait(false);
+
+        if (body is null || string.IsNullOrWhiteSpace(body.Task))
+        {
+            await WriteAsync(context, HttpStatusCode.BadRequest, new ErrorResponse
+            {
+                Error = "'task' is required.",
+                Hint = "One step, in a sentence — not the objective. The subagent gets the mission " +
+                       "and the ledger from here; what it needs from you is what to do next.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        var result = await _subagents
+            .RunAsync(engine, body.Task, body.Agent, _shutdown.Token)
+            .ConfigureAwait(false);
+
+        if (!result.Dispatched)
+        {
+            await WriteAsync(context, HttpStatusCode.Conflict, new SubagentResponse
+            {
+                Dispatched = false,
+                Verdict = result.Detail,
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        var decision = engine.ShouldContinue();
+
+        await WriteAsync(context, HttpStatusCode.OK, new SubagentResponse
+        {
+            Dispatched = true,
+            Verdict = result.Detail,
+            Outcome = result.Verdict?.Outcome,
+            Learned = result.Verdict?.Learned,
+            Next = result.Verdict?.Next,
+            WellFormed = result.Verdict?.WellFormed ?? false,
+            AttemptId = result.AttemptId,
+            Transcript = result.TranscriptPath,
+            Agent = result.AgentId,
+            TotalAttempts = engine.Ledger.Count,
+            MayStop = !decision.Continue,
+        }).ConfigureAwait(false);
     }
 
     private async Task CreateButtonAsync(HttpListenerContext context)

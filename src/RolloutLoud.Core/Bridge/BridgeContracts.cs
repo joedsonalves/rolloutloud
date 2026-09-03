@@ -194,6 +194,50 @@ public sealed record BriefingResponse
     public required bool OffloadActive { get; init; }
 }
 
+/// <summary>The main agent handing one step down to a fresh process.</summary>
+public sealed record SubagentRequest
+{
+    /// <summary>The single step to run. Not the objective — a subagent gets one thing.</summary>
+    public required string Task { get; init; }
+
+    /// <summary>Which CLI runs it. Defaults to the mission's own agent.</summary>
+    public string? Agent { get; init; }
+}
+
+public sealed record SubagentResponse
+{
+    public required bool Dispatched { get; init; }
+
+    /// <summary>
+    /// The whole point: one line, not a transcript.
+    /// </summary>
+    /// <remarks>
+    /// Keeping the subagent's output out of the caller's context is the entire reason this
+    /// endpoint exists. Returning it here would move the cost rather than remove it.
+    /// </remarks>
+    public required string Verdict { get; init; }
+
+    public string? Outcome { get; init; }
+
+    public string? Learned { get; init; }
+
+    public string? Next { get; init; }
+
+    /// <summary>False when the subagent ignored the answer format and its reply was salvaged.</summary>
+    public bool WellFormed { get; init; }
+
+    public string? AttemptId { get; init; }
+
+    /// <summary>Where the full transcript is, if you genuinely need it. You usually do not.</summary>
+    public string? Transcript { get; init; }
+
+    public string? Agent { get; init; }
+
+    public int TotalAttempts { get; init; }
+
+    public bool MayStop { get; init; }
+}
+
 /// <summary>An agent asking to close RolloutLoud because it believes the objective is met.</summary>
 public sealed record ShutdownRequest
 {

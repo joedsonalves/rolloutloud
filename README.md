@@ -167,8 +167,24 @@ Offload inverts that. The main session keeps the mission and the ledger and spen
 **judgement**; each concrete action goes to a fresh subagent with a briefing measured in hundreds
 of tokens, which returns a structured verdict rather than a transcript.
 
+**RolloutLoud runs the subagent, not the main agent.** That division matters: RolloutLoud has no
+model and cannot decide what to try next, so the *task* comes from the main agent, where the
+judgement lives. What RolloutLoud contributes is everything around that decision — a clean process,
+the mission and ledger composed into a short briefing, the transcript written to disk, the verdict
+parsed and filed in the ledger, and a few lines coming back.
+
+```
+without:  main agent -> spawns subagent -> reads 20 KB of output in its OWN context
+with:     main agent -> POST /subagent  -> RolloutLoud runs it, files it, returns 5 lines
+```
+
 The expensive context stops growing — and the attempts get better, because a subagent with no
 memory of forty failures does not inherit the tunnel vision that produced them.
+
+The verdict parser is deliberately forgiving. A subagent asked for five labelled lines returns them
+most of the time and wraps them in prose the rest of it; refusing to parse those would throw away a
+round that was already paid for, and a parser that fails often would turn the barren-round brake
+into a formatting detector. Unparsed answers are salvaged and flagged, never discarded.
 
 ---
 

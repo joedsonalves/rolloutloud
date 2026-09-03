@@ -170,6 +170,42 @@ The only thing that can end a mission as achieved. Runs the gate, and — when i
 result is not reproducible, it is filed as a failed attempt, and the mission continues. Find out
 which of the two runs was lying.
 
+### `POST /v1/missions/active/subagent` — run one step somewhere else
+
+```bash
+curl -X POST "$EP/v1/missions/active/subagent" -H "X-RolloutLoud-Token: $TK" -d '{
+  "task": "Check whether the fixture writes with the wrong line endings",
+  "agent": "codex"
+}'
+```
+
+```json
+{ "dispatched": true,
+  "verdict": "[failed] The fixture writes LF and the assertion expects CRLF — Green with CRLF forced
+              too, so line endings are ruled out. Next: look at the temp directory",
+  "outcome": "failed", "learned": "…", "next": "…", "wellFormed": true,
+  "attemptId": "sub-…", "transcript": "…/.rolloutloud/runs/sub-…/subagent.txt",
+  "totalAttempts": 12, "mayStop": false }
+```
+
+**Send one step, not the objective.** The subagent already gets the mission, the ledger and the
+scope from here; what it needs from you is what to do next. That decision is yours — RolloutLoud
+has no model and cannot make it.
+
+⚠️ **Do not spawn the subagent yourself.** If you do, its whole transcript lands in your context,
+which is the exact cost this mode exists to avoid — twenty kilobytes of output does not get cheaper
+because a subagent produced it. Through this endpoint the transcript goes to disk, the attempt is
+filed in the ledger for you, and you get a few lines back.
+
+The response carries the **verdict, not the output**, on purpose. `transcript` is a path in case
+you genuinely need it; you usually do not.
+
+`wellFormed: false` means the subagent ignored the answer format and its reply was salvaged from
+prose. The round still counts — it was paid for either way — but the `learned` line will be rougher.
+
+Refused with **409** when the mission is not running, when the named agent is unknown, or when it
+is not installed and therefore cannot be driven headlessly.
+
 ### `POST /v1/missions/active/relay` — hand it to another CLI
 
 ```bash
