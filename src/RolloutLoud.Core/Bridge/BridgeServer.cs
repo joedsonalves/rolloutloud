@@ -176,6 +176,12 @@ public sealed class BridgeServer : IAsyncDisposable
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var method = request.HttpMethod;
 
+        if (segments is ["v1", "identity"] && method == "GET")
+        {
+            await IdentityAsync(context).ConfigureAwait(false);
+            return;
+        }
+
         if (segments is ["v1", "shutdown"] && method == "POST")
         {
             await ShutdownAsync(context).ConfigureAwait(false);
@@ -292,7 +298,7 @@ public sealed class BridgeServer : IAsyncDisposable
     {
         var task = request.QueryString["task"];
         var briefing = string.IsNullOrWhiteSpace(task)
-            ? BriefingComposer.ForMainSession(engine.Mission, engine.Ledger)
+            ? BriefingComposer.ForMainSession(engine.Mission, engine.Ledger, _host.HasAttachedIdentity)
             : BriefingComposer.ForSubagent(engine.Mission, engine.Ledger, task);
 
         await WriteAsync(context, HttpStatusCode.OK, new BriefingResponse
@@ -395,7 +401,7 @@ public sealed class BridgeServer : IAsyncDisposable
             warning = scope.NeedsAuthorization
                 ? "Targets are declared but no authorisation is recorded. Fill in 'authorization' before running this against anything live."
                 : null,
-            briefing = BriefingComposer.ForMainSession(engine.Mission, engine.Ledger),
+            briefing = BriefingComposer.ForMainSession(engine.Mission, engine.Ledger, _host.HasAttachedIdentity),
         }).ConfigureAwait(false);
     }
 
@@ -590,6 +596,42 @@ public sealed class BridgeServer : IAsyncDisposable
             context,
             decision.Allowed ? HttpStatusCode.OK : HttpStatusCode.Conflict,
             payload).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Hands over the operator's attached details for one named site.
+    /// </summary>
+    /// <remarks>
+    /// GET with a required <c>?site=</c>, and the site is not a formality: it is what the audit
+    /// line records, and the record is the reason the operator was willing to lend anything.
+    ///
+    /// 404 when nothing is attached, because that is the honest shape — there is no identity here,
+    /// rather than one you are not allowed. The body says so in words an agent can act on: do not
+    /// create accounts, do not invent an address, note it and carry on.
+    /// </remarks>
+    private async Task IdentityAsync(HttpListenerContext context)
+    {
+        var site = context.Request.QueryString["site"];
+        var agent = context.Request.QueryString["agent"];
+
+        var disclosure = _host.DiscloseIdentity(site, agent);
+
+        if (_host.LastIdentityAccess is { } line)
+        {
+            // Loud on purpose. This is the one endpoint that returns the operator's real details,
+            // and they should see it happen rather than find it in a log afterwards.
+            Logged?.Invoke("IDENTITY " + line);
+        }
+
+        await WriteAsync(
+            context,
+            disclosure.Granted ? HttpStatusCode.OK : HttpStatusCode.NotFound,
+            new
+            {
+                granted = disclosure.Granted,
+                reason = disclosure.Reason,
+                fields = disclosure.Granted ? disclosure.Fields : null,
+            }).ConfigureAwait(false);
     }
 
     private async Task CreateButtonAsync(HttpListenerContext context)

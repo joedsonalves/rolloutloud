@@ -182,6 +182,38 @@ you no longer trust.
 
 ---
 
+## If you need an identity
+
+### `GET /v1/identity?site=<host>&agent=<you>`
+
+The operator may have attached details you can sign up with. **They may equally not have**, and
+that absence is an answer rather than a missing setting.
+
+```bash
+curl "$EP/v1/identity?site=app.staging.example.com&agent=claude" -H "X-RolloutLoud-Token: $TK"
+```
+
+```json
+{ "granted": true, "reason": "Use these only for app.staging.example.com.",
+  "fields": { "email": "…", "displayName": "…" } }
+```
+
+**404 when nothing is attached**, and the reason tells you what to do: do not create accounts, do
+not invent an email address or a name to get past a sign-up, record that the objective needs one
+and work on what you can reach without it.
+
+Also refused when you do not name a site, or name one the operator did not list. The site is not
+a formality — it is what the audit line records, and that record is why anything was lent at all.
+
+⚠️ **Ask only when you actually need it.** Every request is written to
+`.rolloutloud/identity-access.log` and shown in the operator's activity feed, granted or not. It
+is deliberately not in your briefing, so asking is a visible act.
+
+⚠️ **There are no passwords or payment details in there, by design.** If a step needs a secret,
+post a fluid button and let the operator run it.
+
+---
+
 ## Finishing
 
 ### `POST /v1/shutdown` — ask to close RolloutLoud

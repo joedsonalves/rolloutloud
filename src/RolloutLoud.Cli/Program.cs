@@ -29,6 +29,7 @@ internal static class Program
             "open" => Open(paths, rest),
             "attach" => await AttachAsync(paths, rest).ConfigureAwait(false),
             "finish" => await FinishAsync(paths, rest).ConfigureAwait(false),
+            "identity" => Identity(paths, rest),
             "status" => await StatusAsync(paths).ConfigureAwait(false),
             "mission" => await MissionAsync(paths, rest).ConfigureAwait(false),
             "briefing" => await BriefingAsync(paths, rest).ConfigureAwait(false),
@@ -202,6 +203,48 @@ internal static class Program
             // Non-zero on a refusal so a script can branch on it without parsing the JSON.
             return body.Contains("\"verdict\": \"refused\"", StringComparison.Ordinal) ? 2 : 0;
         }
+    }
+
+    /// <summary>
+    /// Writes the starter identity file, or says whether one is attached.
+    /// </summary>
+    /// <remarks>
+    /// Only ever on an explicit <c>--template</c>, and it refuses to overwrite. Attaching an
+    /// identity is the operator consenting to lend their details; a command that created the file
+    /// as a side effect of being run would be making that decision for them.
+    /// </remarks>
+    private static int Identity(RolloutPaths paths, string[] args)
+    {
+        var file = paths.IdentityFile;
+
+        if (!args.Contains("--template"))
+        {
+            if (File.Exists(file))
+            {
+                Console.WriteLine($"Attached: {file}");
+                Console.WriteLine($"Delete it to withdraw. Access is recorded in {paths.IdentityAuditFile}.");
+            }
+            else
+            {
+                Console.WriteLine("Nothing attached. Agents are told not to create accounts.");
+                Console.WriteLine($"To lend details:  rollout identity --template   then edit {file}");
+            }
+
+            return 0;
+        }
+
+        if (File.Exists(file))
+        {
+            Console.Error.WriteLine($"{file} already exists. Edit it rather than regenerating — " +
+                                    "overwriting would silently drop whatever is in there now.");
+            return 1;
+        }
+
+        AttachedIdentity.WriteTemplate(file);
+        Console.WriteLine($"Wrote {file}");
+        Console.WriteLine("Edit it, then agents can ask for it by site. It is plaintext on disk, and");
+        Console.WriteLine("anything read from it becomes part of an agent's context. No passwords in there.");
+        return 0;
     }
 
     private static int Open(RolloutPaths paths, string[] args)
@@ -487,6 +530,11 @@ internal static class Program
               rollout attempt "<hypothesis>" "<command>" [--outcome ...] [--learned "..."]
               rollout continue                 Whether you may stop. Almost always: no.
               rollout gate                     Ask the success gate. The only way a mission ends.
+
+            Identity
+              rollout identity                 Is one attached?
+              rollout identity --template      Write a starter file to lend details from.
+                                             No file means agents are told not to create accounts.
 
             Finishing
               rollout finish "<what was achieved>" [--agent <id>]

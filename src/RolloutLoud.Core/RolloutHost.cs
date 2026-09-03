@@ -157,6 +157,83 @@ public sealed class RolloutHost
     /// </remarks>
     public const string ShutdownButtonCommand = "rolloutloud:shutdown";
 
+    /// <summary>Whether an identity has been lent at all. Never exposes the contents.</summary>
+    public bool HasAttachedIdentity => AttachedIdentity.Load(Paths.IdentityFile) is { IsUsable: true };
+
+    /// <summary>
+    /// Hands an agent the attached identity for one named site, and writes down that it did.
+    /// </summary>
+    /// <remarks>
+    /// Re-read from disk on every request rather than cached, so deleting the file withdraws the
+    /// grant immediately — which is the operator's only lever once a run is going, and it has to
+    /// work without a restart.
+    ///
+    /// The audit line is not bookkeeping. This is the one place the tool hands out the operator's
+    /// real details, and "which agent asked for what, when" is the question they will have later.
+    /// It is appended before the value is returned, so a crash mid-response still leaves the
+    /// record.
+    /// </remarks>
+    public IdentityDisclosure DiscloseIdentity(string? site, string? requestedBy)
+    {
+        var identity = AttachedIdentity.Load(Paths.IdentityFile);
+
+        if (identity is null || !identity.IsUsable)
+        {
+            return IdentityDisclosure.Refused(
+                "No identity is attached, so the operator has not lent you one. Do not create " +
+                "accounts, and do not use an address you invented. If the mission genuinely needs " +
+                "one, say so in your next attempt's observation and carry on with what you can do.");
+        }
+
+        if (string.IsNullOrWhiteSpace(site))
+        {
+            return IdentityDisclosure.Refused(
+                "Name the site you need it for, as ?site=example.com. The operator listed which " +
+                "sites this identity may be used on, and the record of what it was used for is " +
+                "the reason it was lent at all.");
+        }
+
+        if (!identity.AllowsSite(site))
+        {
+            AuditIdentity(site, requestedBy, granted: false);
+            return IdentityDisclosure.Refused(
+                $"'{site}' is not on the list of sites this identity may be used on: " +
+                string.Join(", ", identity.AllowedSites) + ".");
+        }
+
+        AuditIdentity(site, requestedBy, granted: true);
+        StateChanged?.Invoke();
+
+        return new IdentityDisclosure
+        {
+            Granted = true,
+            Reason = identity.Note ?? "Use these only for " + site + ".",
+            Fields = identity.Fields,
+        };
+    }
+
+    private void AuditIdentity(string site, string? requestedBy, bool granted)
+    {
+        var line =
+            $"{DateTimeOffset.Now:u}  {(granted ? "GRANTED" : "REFUSED")}  " +
+            $"site={site}  agent={requestedBy ?? "unknown"}  mission={ActiveMissionId ?? "-"}";
+
+        LastIdentityAccess = line;
+
+        try
+        {
+            Directory.CreateDirectory(Paths.StateRoot);
+            File.AppendAllText(Paths.IdentityAuditFile, line + Environment.NewLine);
+        }
+        catch (IOException)
+        {
+            // The in-memory line still reaches the activity log, which is what the operator sees.
+        }
+    }
+
+    /// <summary>Most recent identity request, for the activity log.</summary>
+    public string? LastIdentityAccess { get; private set; }
+
     public IReadOnlyList<MissionEngine> Missions
     {
         get { lock (_gate) { return [.. _engines.Values]; } }
@@ -227,7 +304,7 @@ public sealed class RolloutHost
     {
         if (mission is not null)
         {
-            var briefing = Offload.BriefingComposer.ForMainSession(mission.Mission, mission.Ledger);
+            var briefing = Offload.BriefingComposer.ForMainSession(mission.Mission, mission.Ledger, HasAttachedIdentity);
             var target = Path.Combine(Paths.RepositoryRoot, agent.InstructionFile);
             WriteBriefingSection(target, briefing);
         }

@@ -272,6 +272,52 @@ at the top of the mission panel switches which one `active` resolves to for an a
 bridge without naming one. For genuinely separate work, run RolloutLoud in a second folder — the
 repository is the anchor, so that is a second instance with its own port and its own missions.
 
+## Lending an agent an identity
+
+Some work genuinely needs one — signing up on a staging environment, a test account on a service
+the mission has to exercise. RolloutLoud handles that by **attachment**, and the default is no.
+
+```
+rollout identity --template      # then edit .rolloutloud/identity.json
+```
+
+```json
+{
+  "allowedSites": ["app.staging.example.com"],
+  "fields": { "email": "you+rolloutloud@example.com", "displayName": "Test Account" }
+}
+```
+
+**No file means no.** An agent that asks is told not to create accounts anywhere and not to invent
+an address to get past a sign-up — so declining is what happens if you never think about this,
+which is the right way round.
+
+- It is **never folded into a briefing**. The agent has to ask, naming the site, which is what
+  creates the record. Otherwise your email would sit in the context of every round whether it was
+  needed or not.
+- Only for **sites you listed**. Same idea as the mission scope, and an empty list grants nothing —
+  a file you started and did not finish is not a wider grant than one you never wrote.
+- **Every request is logged**, granted or refused, to `.rolloutloud/identity-access.log` and to the
+  activity feed. "Which agent asked for what, when" is the question you will have later.
+- Delete the file to withdraw it. It is re-read on every request, so that takes effect at once.
+
+> ⚠️ **This is plaintext on disk, and anything read from it becomes part of an agent's context —
+> which means it reaches the model provider.** Use an address you are willing to have there, like a
+> `+tag` alias. There is deliberately no place for passwords, payment details or recovery codes: if
+> a step needs a secret, the agent should post a fluid button and let you run it.
+
+## Running out of tokens mid-mission
+
+A six-hour run will cross a usage window. The watchdog reads the CLI's own limit message, works out
+when the window reopens, waits until then **plus a minute**, and continues — with the ledger intact.
+
+That round does not count toward the barren-round brake, which matters: out of allowance and out of
+ideas look identical from outside, and three quota hits would otherwise end a run that was going
+perfectly well.
+
+If no reset time is given it waits half an hour and tries again. If the window does not reopen for
+longer than the ceiling (six hours by default), it stops and says so rather than sleeping all day.
+
 ## What it does not do
 
 - **It does not bypass UAC or its equivalent.** A UAC bypass is a security-control evasion

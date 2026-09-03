@@ -18,7 +18,7 @@ namespace RolloutLoud.Core.Offload;
 /// </remarks>
 public static class BriefingComposer
 {
-    public static string ForMainSession(Mission mission, MissionLedger ledger)
+    public static string ForMainSession(Mission mission, MissionLedger ledger, bool identityAttached = false)
     {
         var sb = new StringBuilder();
 
@@ -94,6 +94,19 @@ public static class BriefingComposer
         sb.AppendLine("## Ledger");
         sb.AppendLine();
         sb.AppendLine(ledger.Summarize());
+        sb.AppendLine();
+
+        sb.AppendLine("## If you need an identity");
+        sb.AppendLine();
+        sb.AppendLine(identityAttached
+            ? "The operator has attached details you may sign up with. Ask for them when you " +
+              "actually need them — `GET /v1/identity?site=<host>&agent=<you>` — naming the site. " +
+              "They are only released for sites the operator listed, and every request is recorded. " +
+              "Do not ask speculatively, and do not use them anywhere but the site you named."
+            : "**Nothing is attached, which means no.** Do not create accounts anywhere, and do not " +
+              "invent an email address or a name to get past a sign-up. If the objective genuinely " +
+              "requires an account, record that in your next observation and work on what you can " +
+              "reach without one.");
         sb.AppendLine();
 
         sb.AppendLine("## Bridge");
