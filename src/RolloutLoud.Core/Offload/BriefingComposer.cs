@@ -84,10 +84,24 @@ public static class BriefingComposer
                     : $"Once your context passes ~{mission.Offload.TokenThreshold:N0} tokens, every concrete action goes to a subagent.");
             sb.AppendLine();
             sb.AppendLine(
-                "Spend your own window on judgement — what to try next, and what the results mean. " +
-                "Hand execution down with a briefing built from `GET /v1/missions/{id}/briefing`, and " +
-                $"give each subagent at most {mission.Offload.AttemptsPerSubagent} attempt(s). Do not " +
-                "paste transcripts into your own context: read the verdict, record the observation, decide again.");
+                "Spend your own window on judgement — what to try next, and what the results mean — " +
+                "and hand the doing down:");
+            sb.AppendLine();
+            sb.AppendLine("```");
+            sb.AppendLine("POST /v1/missions/active/subagent   {\"task\": \"<one step, in a sentence>\"}");
+            sb.AppendLine("```");
+            sb.AppendLine();
+            sb.AppendLine(
+                "**Do not spawn the subagent yourself.** If you do, its whole transcript lands in " +
+                "your context, which is the exact cost this mode exists to avoid — twenty kilobytes " +
+                "of output does not get cheaper because a subagent produced it. Through the bridge, " +
+                "RolloutLoud runs it in a clean process, files the transcript to disk, records the " +
+                "attempt in the ledger for you, and returns a few lines.");
+            sb.AppendLine();
+            sb.AppendLine(
+                "Send **one step**, not the objective. The subagent already gets the mission, the " +
+                "ledger and the scope from here; what it needs from you is what to do next. Read the " +
+                "verdict, decide again, send the next one.");
             sb.AppendLine();
         }
 

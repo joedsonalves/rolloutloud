@@ -30,6 +30,7 @@ internal static class Program
             "attach" => await AttachAsync(paths, rest).ConfigureAwait(false),
             "finish" => await FinishAsync(paths, rest).ConfigureAwait(false),
             "identity" => Identity(paths, rest),
+            "subagent" => await SubagentAsync(paths, rest).ConfigureAwait(false),
             "status" => await StatusAsync(paths).ConfigureAwait(false),
             "mission" => await MissionAsync(paths, rest).ConfigureAwait(false),
             "briefing" => await BriefingAsync(paths, rest).ConfigureAwait(false),
@@ -415,6 +416,25 @@ internal static class Program
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Hands one step to a fresh process and prints the verdict, not the transcript.
+    /// </summary>
+    private static async Task<int> SubagentAsync(RolloutPaths paths, string[] args)
+    {
+        if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine(
+                "Usage: rollout subagent \"<one step>\" [--agent <id>]");
+            return 1;
+        }
+
+        return await SendAsync(paths, client => client.PostAsync("/v1/missions/active/subagent", new
+        {
+            task = args[0],
+            agent = Option(args, "--agent"),
+        })).ConfigureAwait(false);
+    }
+
     private static async Task<int> ButtonAsync(RolloutPaths paths, string[] args)
     {
         var title = Option(args, "--title");
@@ -528,6 +548,10 @@ internal static class Program
               rollout admit "<hypothesis>" "<command>"
                                              Ask before running. Rejects repeats and out-of-scope.
               rollout attempt "<hypothesis>" "<command>" [--outcome ...] [--learned "..."]
+              rollout subagent "<one step>" [--agent <id>]
+                                             Run one step in a fresh process. Returns the verdict,
+                                             not the transcript — the point is that the output
+                                             never reaches your context.
               rollout continue                 Whether you may stop. Almost always: no.
               rollout gate                     Ask the success gate. The only way a mission ends.
 

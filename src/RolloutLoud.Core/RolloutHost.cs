@@ -25,6 +25,8 @@ public sealed class RolloutHost
     private readonly Dictionary<string, FluidButton> _buttons = new(StringComparer.Ordinal);
     private ButtonAllowlist _allowlist = ButtonAllowlist.Empty;
     private DateTime _allowlistStamp = DateTime.MinValue;
+    private IReadOnlyList<AgentDescriptor> _agents = AgentCatalog.Defaults;
+    private DateTime _agentsStamp = DateTime.MinValue;
 
     public RolloutHost(RolloutPaths paths, IElevationService elevation)
     {
@@ -33,13 +35,43 @@ public sealed class RolloutHost
         Paths.EnsureCreated();
 
         Store = new MissionStore(paths);
-        Agents = AgentCatalog.Load(paths.AgentsFile);
+        Housekeeping = new Housekeeper(paths);
 
         foreach (var record in Store.LoadAll())
         {
             var ledger = new MissionLedger(record.Mission.Id, record.Attempts);
             _engines[record.Mission.Id] = new MissionEngine(record.Mission, ledger, Store, paths);
         }
+
+        // Tidy after loading, not before: the missions have to be known so the run folders that
+        // still belong to an open one can be protected from the prune.
+        if (Housekeeping.Policy.RunOnStartup)
+        {
+            LastHousekeeping = Tidy();
+        }
+    }
+
+    public Housekeeper Housekeeping { get; }
+
+    /// <summary>What the last tidy found and removed. Shown in the window.</summary>
+    public HousekeepingReport? LastHousekeeping { get; private set; }
+
+    /// <summary>
+    /// Prunes run folders and archives finished missions.
+    /// </summary>
+    /// <remarks>
+    /// Run folders belonging to a mission that is still open are protected whatever their age.
+    /// Deleting the evidence under a running mission would leave ledger entries pointing at
+    /// nothing, which is worse than any amount of disk.
+    /// </remarks>
+    public HousekeepingReport Tidy()
+    {
+        var open = _engines.Values.Select(e => e.Mission).ToList();
+        var report = Housekeeping.Tidy(Housekeeper.ProtectedRunsFor(open, Store));
+
+        LastHousekeeping = report;
+        StateChanged?.Invoke();
+        return report;
     }
 
     public RolloutPaths Paths { get; }
@@ -48,7 +80,41 @@ public sealed class RolloutHost
 
     public MissionStore Store { get; }
 
-    public IReadOnlyList<AgentDescriptor> Agents { get; private set; }
+    /// <summary>
+    /// The configured CLIs, re-read whenever agents.json changes.
+    /// </summary>
+    /// <remarks>
+    /// Live for the same reason the allowlist is: the operator edits this file precisely in the
+    /// middle of a session — a bypass flag stopped working, or a new CLI needs registering — and
+    /// making the edit take effect only after a restart means it silently does nothing at the one
+    /// moment it was wanted.
+    ///
+    /// It was startup-only until a test registered a new agent mid-run and got "unknown agent"
+    /// back, which reads as a bug in the request rather than in the timing.
+    /// </remarks>
+    public IReadOnlyList<AgentDescriptor> Agents
+    {
+        get
+        {
+            var stamp = File.Exists(Paths.AgentsFile)
+                ? File.GetLastWriteTimeUtc(Paths.AgentsFile)
+                : DateTime.MinValue;
+
+            lock (_gate)
+            {
+                if (stamp != _agentsStamp)
+                {
+                    _agents = AgentCatalog.Load(Paths.AgentsFile);
+                    _agentsStamp = stamp;
+
+                    // A newly registered CLI may well have just been installed too.
+                    AgentAvailability.Forget();
+                }
+
+                return _agents;
+            }
+        }
+    }
 
     /// <summary>
     /// The current allowlist, re-read whenever the file on disk has changed.
@@ -284,11 +350,8 @@ public sealed class RolloutHost
         StateChanged?.Invoke();
     }
 
-    public void ReloadConfiguration()
-    {
-        Agents = AgentCatalog.Load(Paths.AgentsFile);
-        StateChanged?.Invoke();
-    }
+    /// <summary>Nudges the UI after the starter files are written. Both tables re-read themselves.</summary>
+    public void ReloadConfiguration() => StateChanged?.Invoke();
 
     /// <summary>
     /// Writes the mission briefing into the agent's instruction file and opens its terminal.

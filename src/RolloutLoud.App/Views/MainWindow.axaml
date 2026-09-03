@@ -194,6 +194,18 @@
             </StackPanel>
           </Border>
 
+          <!-- Disk. Visible rather than silent: the growth is invisible otherwise until somebody
+               wonders why a folder has twelve thousand directories in it. -->
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{loc:Tr Key=housekeeping.title}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{loc:Tr Key=housekeeping.hint}" Classes="hint" />
+              <TextBlock Text="{Binding DiskSummary}" Classes="hint mono" />
+              <Button Content="{loc:Tr Key=housekeeping.tidy}" Command="{Binding TidyUp}"
+                      Padding="12,6" HorizontalAlignment="Left" />
+            </StackPanel>
+          </Border>
+
           <!-- Attached identity. The warning is shown whenever a file exists rather than hidden
                behind a link: the moment that matters is when somebody is about to put something
                in the file, not when they last read the README. -->

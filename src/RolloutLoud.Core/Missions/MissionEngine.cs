@@ -20,15 +20,20 @@ public sealed record MissionEvent(DateTimeOffset At, string Kind, string Message
 ///   it re-runs a satisfied gate from a clean process before believing it.
 /// - <see cref="ShouldContinue"/> answers whether the agent is allowed to stop. Almost always: no.
 ///
-/// It is single-threaded by contract. The bridge serialises calls behind one lock per mission,
-/// because cross-agent relay puts two CLIs on the same ledger and a duplicate slipping through
-/// the race would defeat the point of having a ledger.
+/// **It locks itself rather than trusting callers to.** It used to be single-threaded by
+/// contract, with the bridge serialising the two routes it knew about. Then subagent execution
+/// added a third path that writes the ledger, and a burst of ten finished at once — a data race on
+/// the attempt list, and two failed saves colliding on one temp file.
+///
+/// A contract that says "call me from one thread" is only as good as the newest caller having read
+/// it. This one enforces its own.
 /// </remarks>
 public sealed class MissionEngine
 {
     private readonly MissionStore _store;
     private readonly RolloutPaths _paths;
     private readonly List<MissionEvent> _events = [];
+    private readonly Lock _gate = new();
 
     public MissionEngine(Mission mission, MissionLedger ledger, MissionStore store, RolloutPaths paths)
     {
@@ -145,6 +150,14 @@ public sealed class MissionEngine
     /// </summary>
     public AttemptAdmission Admit(string agentId, string hypothesis, string command)
     {
+        lock (_gate)
+        {
+            return AdmitCore(agentId, hypothesis, command);
+        }
+    }
+
+    private AttemptAdmission AdmitCore(string agentId, string hypothesis, string command)
+    {
         var admission = Ledger.Admit(command, Mission.Scope);
 
         if (admission.Admitted)
@@ -187,6 +200,14 @@ public sealed class MissionEngine
 
     /// <summary>Records a finished attempt and lets the ladder react to it.</summary>
     public Attempt Record(Attempt attempt)
+    {
+        lock (_gate)
+        {
+            return RecordCore(attempt);
+        }
+    }
+
+    private Attempt RecordCore(Attempt attempt)
     {
         Ledger.Record(attempt);
         Log("attempt", $"[{attempt.Outcome}] {attempt.Hypothesis}");
@@ -238,7 +259,7 @@ public sealed class MissionEngine
                         "First: " + verdict.Detail + " Second: " + second.Detail,
                 };
 
-                Record(new Attempt
+                RecordUnderLock(new Attempt
                 {
                     Id = NewAttemptId(),
                     MissionId = Mission.Id,
@@ -299,6 +320,21 @@ public sealed class MissionEngine
         return new ContinuationDecision(
             true,
             "Keep going. " + EscalationLadder.InstructionFor(Mission.EscalationTier));
+    }
+
+    /// <summary>
+    /// Records from a path that is already inside the lock, or safely outside every other writer.
+    /// </summary>
+    /// <remarks>
+    /// Split out because System.Threading.Lock is reentrant and relying on that quietly is how a
+    /// later refactor that splits the lock introduces a race nobody is looking for.
+    /// </remarks>
+    private void RecordUnderLock(Attempt attempt)
+    {
+        lock (_gate)
+        {
+            RecordCore(attempt);
+        }
     }
 
     private void Exhaust(string reason)

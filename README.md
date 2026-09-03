@@ -167,8 +167,24 @@ Offload inverts that. The main session keeps the mission and the ledger and spen
 **judgement**; each concrete action goes to a fresh subagent with a briefing measured in hundreds
 of tokens, which returns a structured verdict rather than a transcript.
 
+**RolloutLoud runs the subagent, not the main agent.** That division matters: RolloutLoud has no
+model and cannot decide what to try next, so the *task* comes from the main agent, where the
+judgement lives. What RolloutLoud contributes is everything around that decision — a clean process,
+the mission and ledger composed into a short briefing, the transcript written to disk, the verdict
+parsed and filed in the ledger, and a few lines coming back.
+
+```
+without:  main agent -> spawns subagent -> reads 20 KB of output in its OWN context
+with:     main agent -> POST /subagent  -> RolloutLoud runs it, files it, returns 5 lines
+```
+
 The expensive context stops growing — and the attempts get better, because a subagent with no
 memory of forty failures does not inherit the tunnel vision that produced them.
+
+The verdict parser is deliberately forgiving. A subagent asked for five labelled lines returns them
+most of the time and wraps them in prose the rest of it; refusing to parse those would throw away a
+round that was already paid for, and a parser that fails often would turn the barren-round brake
+into a formatting detector. Unparsed answers are salvaged and flagged, never discarded.
 
 ---
 
@@ -310,6 +326,44 @@ which is the right way round.
 > not belong: payment details, a password you use anywhere real, recovery codes, and API keys with
 > spend attached. If a step needs one of those, the agent should post a fluid button and let you
 > run it.
+
+## What it keeps on disk, and for how long
+
+Every subagent round writes its task, the briefing it was given and its full output to
+`.rolloutloud/runs/`. Measured: about 1.7 KB with a stub that answers in five lines, tens of
+kilobytes with a real agent that returns a transcript.
+
+A project whose main agent fires ten subagents from the first turn produces **thousands of
+directories in a month**, and the folder count becomes a problem long before the disk does —
+twelve thousand directories is slow to enumerate, slow to open and slow to back up while still
+being a rounding error in megabytes.
+
+So RolloutLoud tidies up on startup:
+
+| What | Rule |
+|---|---|
+| Run folders | Removed past 30 days, or beyond the newest 500 — whichever bites first |
+| Run folders of an **open** mission | Never removed, whatever their age |
+| Finished missions | **Archived** after 14 days, into `missions/archive/` |
+| Open missions | Never archived, however old |
+
+Missions are archived and never deleted, because the ledger is the most expensive thing the tool
+produces — the record of what has been ruled out. Moving it out of the load path keeps startup
+fast and the mission list readable without throwing away the reasoning.
+
+The window shows what is on disk and what the last tidy removed, and there is a button to run one
+now. It is visible rather than silent because the growth is invisible otherwise, until somebody
+wonders why a folder has twelve thousand directories in it.
+
+## Sending several subagents at once
+
+Four run at a time. Beyond that they queue, and a round that waits more than five minutes for a
+slot is **refused with a 429** rather than left hanging — the caller learns it is over-sending
+while it can still do something about it, instead of collecting a timeout that reads as
+"RolloutLoud is broken".
+
+`throttled: true` in the response means retry shortly; a plain 409 means the request itself will
+never work. They are different problems and the agent should not have to guess which it hit.
 
 ## Handing a stuck mission to a different CLI
 

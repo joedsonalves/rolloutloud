@@ -44,9 +44,32 @@ public sealed class MissionStore
 
         // Write beside, then move. A half-written ledger read back after a crash would present
         // fabricated history to the next agent, which is worse than presenting none.
-        var temporary = file + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(record, Options));
-        File.Move(temporary, file, overwrite: true);
+        //
+        // The temp name carries a GUID because it used to be just "<file>.tmp", and two writers
+        // finishing in the same instant collided on it — one got "the process cannot access the
+        // file because it is being used by another process" and the whole request failed with a
+        // 500. Found by firing ten subagents at once, which is how several real projects work.
+        var temporary = file + "." + Guid.NewGuid().ToString("N")[..8] + ".tmp";
+
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(record, Options));
+            File.Move(temporary, file, overwrite: true);
+        }
+        catch
+        {
+            // Never leave a half-written temp file behind to be mistaken for something.
+            try
+            {
+                File.Delete(temporary);
+            }
+            catch (IOException)
+            {
+                // Best effort.
+            }
+
+            throw;
+        }
     }
 
     public MissionRecord? Load(string missionId)
