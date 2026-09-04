@@ -150,6 +150,80 @@ public sealed class MissionEngine
     }
 
     /// <summary>
+    /// Records a question the agent could not settle alone. Never changes the run's state.
+    /// </summary>
+    /// <remarks>
+    /// Asking is not stopping, and that separation is the entire value: an agent that blocks on a
+    /// question has handed the decision to somebody who may be asleep, which is the move this
+    /// product exists to remove.
+    /// </remarks>
+    public AgentQuestion Ask(AgentQuestion question)
+    {
+        lock (_gate)
+        {
+            Mission = Mission with { Questions = [.. Mission.Questions, question] };
+        }
+
+        Log("question", $"{question.From}: {question.Question}");
+        Persist();
+        return question;
+    }
+
+    /// <summary>The supervisor answering. Returns null when there is no such open question.</summary>
+    public AgentQuestion? Answer(string questionId, string answer, string? from)
+    {
+        lock (_gate)
+        {
+            var open = Mission.Questions.FirstOrDefault(q => q.Id == questionId && q.IsOpen);
+
+            if (open is null)
+            {
+                return null;
+            }
+
+            var answered = open with
+            {
+                Answer = answer,
+                AnsweredBy = from ?? "the supervisor",
+                AnsweredAt = DateTimeOffset.UtcNow,
+            };
+
+            Mission = Mission with
+            {
+                Questions = [.. Mission.Questions.Select(q => q.Id == questionId ? answered : q)],
+            };
+
+            Log("answer", $"{answered.AnsweredBy}: {answer}");
+            Persist();
+            return answered;
+        }
+    }
+
+    /// <summary>Hands over answers the agent has not collected, and marks them delivered.</summary>
+    public IReadOnlyList<AgentQuestion> CollectAnswers()
+    {
+        lock (_gate)
+        {
+            var pending = Mission.Questions.Where(q => q.IsUndelivered).ToList();
+
+            if (pending.Count == 0)
+            {
+                return [];
+            }
+
+            var now = DateTimeOffset.UtcNow;
+
+            Mission = Mission with
+            {
+                Questions = [.. Mission.Questions.Select(q => q.IsUndelivered ? q with { DeliveredAt = now } : q)],
+            };
+
+            Persist();
+            return pending;
+        }
+    }
+
+    /// <summary>
     /// Records what the supervisor asked for after reading the deliverable.
     /// </summary>
     /// <remarks>

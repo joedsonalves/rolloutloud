@@ -735,8 +735,7 @@ public sealed class MainViewModel : Observable
                 return Localizer.Current["stop.maxSpend.none"];
             }
 
-            var reading = _host.Spend.Read(
-                _mission.Mission.AgentId, _host.Paths.RepositoryRoot, _mission.Mission.StartedAt);
+            var reading = _host.SpendReading(_mission.Mission);
 
             return reading.HasNumber ? reading.Summary : Localizer.Current["stop.maxSpend.none"];
         }

@@ -62,7 +62,7 @@ public sealed class RolloutHost
             // does not — on exactly the long runs a spend cap exists for.
             var engine = new MissionEngine(record.Mission, ledger, Store, paths)
             {
-                ReadContextTokens = TokensFor,
+                ReadContextTokens = id => TokensFor(id, WhereItWorks(record.Mission)),
                 ReadSpend = BudgetFor,
             };
 
@@ -90,17 +90,50 @@ public sealed class RolloutHost
 
     /// <summary>Whether concrete actions should be going to subagents right now.</summary>
     public OffloadDecision OffloadNow(Mission mission) =>
-        Context.ShouldOffload(mission, Paths.RepositoryRoot);
+        Context.ShouldOffload(mission, WhereItWorks(mission));
+
+    /// <summary>
+    /// Where a mission's agent is actually working, which is where its transcript will be.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ Both meters read another program's per-project transcript, keyed by the directory the
+    /// session was opened in. Reading them at the ANCHOR when the agent is working somewhere else
+    /// measures the wrong session entirely — and on this machine that meant a mission with a $10
+    /// cap reporting $50.28 of spend, all of it belonging to the operator's own session in the
+    /// RolloutLoud repository, before the agent had made a single attempt.
+    ///
+    /// It fails in the dangerous direction: the next call to <c>/continue</c> would have exhausted
+    /// a healthy run on somebody else's bill, and the stop reason would have read like a real one.
+    /// </remarks>
+    private string WhereItWorks(Mission mission) =>
+        mission.WorkingDirectory is { Length: > 0 } elsewhere
+            ? Path.GetFullPath(elsewhere)
+            : Paths.RepositoryRoot;
 
     /// <summary>The window size for an agent, or null when nothing can read it.</summary>
-    private int? TokensFor(string agentId)
+    private int? TokensFor(string agentId, string repositoryRoot)
     {
-        var reading = Context.Read(agentId, Paths.RepositoryRoot);
+        var reading = Context.Read(agentId, repositoryRoot);
         return reading.HasNumber ? reading.Tokens : null;
     }
 
     /// <summary>What a mission has spent, and whether that is past its cap.</summary>
     public SpendMeter Spend { get; }
+
+    /// <summary>
+    /// What one mission has spent, read where its agent actually works.
+    /// </summary>
+    /// <remarks>
+    /// Exposed so no caller has to remember that the meter is per-directory. The bridge asking
+    /// <c>Spend.Evaluate(mission, anchor)</c> is how the wrong session got billed to a mission in
+    /// the first place, and a helper that cannot be called wrongly beats a comment asking people
+    /// not to.
+    /// </remarks>
+    public BudgetVerdict SpendOn(Mission mission) => Spend.Evaluate(mission, WhereItWorks(mission));
+
+    /// <summary>The figure alone, for the window. Same rule about where it is read.</summary>
+    public SpendReading SpendReading(Mission mission) =>
+        Spend.Read(mission.AgentId, WhereItWorks(mission), mission.StartedAt);
 
     /// <summary>How much each Fourth Wall mission has kept from whoever is steering it.</summary>
     public FourthWallAudit Wall { get; } = new();
@@ -204,7 +237,7 @@ public sealed class RolloutHost
     /// a cap that silently never fires, which is what an unmeasurable agent would otherwise get.
     /// </remarks>
     private BudgetVerdict BudgetFor(Mission mission) =>
-        Spend.Evaluate(mission, Paths.RepositoryRoot, TokensFor(mission.AgentId));
+        Spend.Evaluate(mission, WhereItWorks(mission), TokensFor(mission.AgentId, WhereItWorks(mission)));
 
     /// <summary>What the last tidy found and removed. Shown in the window.</summary>
     public HousekeepingReport? LastHousekeeping { get; private set; }
@@ -540,7 +573,7 @@ public sealed class RolloutHost
         lock (_gate)
         {
             engine = MissionEngine.Create(mission, Store, Paths);
-            engine.ReadContextTokens = TokensFor;
+            engine.ReadContextTokens = id => TokensFor(id, WhereItWorks(mission));
             engine.ReadSpend = BudgetFor;
             _engines[mission.Id] = engine;
             ActiveMissionId = mission.Id;
@@ -758,6 +791,17 @@ public sealed class RolloutHost
             {
                 ["ROLLOUTLOUD_BRIDGE"] = BridgeEndpoint ?? string.Empty,
                 ["ROLLOUTLOUD_TOKEN"] = BridgeToken ?? string.Empty,
+
+                // ⚠️ The endpoint and token above are a SNAPSHOT taken at launch, and the port
+                // changes every time RolloutLoud restarts — which this project's own build rule
+                // guarantees will happen, because the exe has to be killed before compiling. An
+                // agent holding only those is stranded the first time that happens, retrying a dead
+                // port for ever with no way to learn the new one.
+                //
+                // The handshake file is the live answer, and an agent working outside the anchor
+                // cannot find it by looking around: it lives in the RolloutLoud repository, not in
+                // the one the agent is standing in. So it is handed over by absolute path.
+                ["ROLLOUTLOUD_HANDSHAKE"] = Paths.BridgeHandshakeFile,
                 ["ROLLOUTLOUD_MISSION"] = mission?.Mission.Id ?? string.Empty,
                 ["ROLLOUTLOUD_AGENT"] = agent.Id,
             },

@@ -36,6 +36,9 @@ internal static class Program
             "ledger" => await LedgerAsync(paths, rest).ConfigureAwait(false),
             "spend" => await SimpleGetAsync(paths, "/v1/missions/active/spend").ConfigureAwait(false),
             "wall" => await SimpleGetAsync(paths, "/v1/missions/active/wall").ConfigureAwait(false),
+            "ask" => await AskAsync(paths, rest).ConfigureAwait(false),
+            "questions" => await SimpleGetAsync(paths, "/v1/missions/active/questions").ConfigureAwait(false),
+            "answer" => await AnswerAsync(paths, rest).ConfigureAwait(false),
             "review" => await ReviewAsync(paths, rest).ConfigureAwait(false),
             "scope" => await ScopeAsync(paths, rest).ConfigureAwait(false),
             "launch" => await SimplePostAsync(paths, "/v1/missions/active/launch").ConfigureAwait(false),
@@ -678,6 +681,59 @@ internal static class Program
     }
 
     /// <summary>
+    /// Asks the supervisor something, and carries on.
+    /// </summary>
+    /// <remarks>
+    /// There is deliberately no --wait. Waiting is the whole thing this replaces: an agent that
+    /// blocks on a question has handed the decision to somebody who may be asleep, and it looks
+    /// identical whether the reason was good or bad.
+    /// </remarks>
+    private static async Task<int> AskAsync(RolloutPaths paths, string[] args)
+    {
+        if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine(
+                "Usage: rollout ask \"<question>\" [--options \"a,b,c\"] [--if-unanswered \"<what you will do>\"]\n\n" +
+                "Nothing waits on it. Ask, keep working, collect the answer on a later 'continue'.");
+            return 1;
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["question"] = args[0],
+            ["from"] = Option(args, "--from"),
+            ["ifUnanswered"] = Option(args, "--if-unanswered"),
+        };
+
+        if (Option(args, "--options") is { Length: > 0 } options)
+        {
+            payload["options"] = options.Split(
+                ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+
+        return await SendAsync(
+            paths,
+            client => client.PostAsync("/v1/missions/active/question", payload)).ConfigureAwait(false);
+    }
+
+    /// <summary>Answers one of the agent's open questions.</summary>
+    private static async Task<int> AnswerAsync(RolloutPaths paths, string[] args)
+    {
+        if (args.Length < 2)
+        {
+            Console.Error.WriteLine(
+                "Usage: rollout answer <question-id> \"<answer>\" [--from <id>]\n\n" +
+                "'rollout questions' lists the open ones. Your answer is free text — it does not " +
+                "have to be one of the options the agent offered, and often should not be.");
+            return 1;
+        }
+
+        return await SendAsync(paths, client => client.PostAsync(
+            $"/v1/missions/active/questions/{args[0]}/answer",
+            new { answer = args[1], from = Option(args, "--from") ?? "claude" })).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Bounds the run to targets that were not known when the mission opened.
     /// </summary>
     /// <remarks>
@@ -1001,6 +1057,13 @@ internal static class Program
               rollout scope "a.example.com,*.staging.example.com" --auth "<what permits it>"
                                              Bound the run once you know where the boundary is.
                                              Narrows only — it can never be widened.
+              rollout ask "<question>" [--options "a,b,c"] [--if-unanswered "..."]
+                                             Ask the supervisor something you cannot settle.
+                                             NOTHING WAITS ON IT — carry on, the answer reaches
+                                             you on a later continue. Printing a menu instead is
+                                             the hand-back this replaces.
+              rollout questions                What the agent has asked and nobody has answered.
+              rollout answer <id> "<answer>"   Answer one. Never limited to the options offered.
               rollout review "<what it still needs>" [--missing "a,b,c"] [--blocking]
                                              Read the deliverable, then say what is missing. The
                                              agent gets it on its next 'continue', once. It never

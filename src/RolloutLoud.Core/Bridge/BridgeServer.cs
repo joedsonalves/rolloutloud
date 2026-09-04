@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -48,11 +49,39 @@ public sealed class BridgeServer : IAsyncDisposable
     private readonly Offload.SubagentRunner _subagents;
     private Task? _loop;
 
+    /// <param name="port">0 to reuse the last one if it is free, or pick a free one.</param>
+    /// <remarks>
+    /// ⚠️ <b>A restart used to strand every running agent, and this project's own build rule
+    /// guarantees restarts:</b> the exe locks its DLLs, so it must be killed before compiling. The
+    /// endpoint and token reach an agent as environment variables at launch — a snapshot — so a new
+    /// port and a new token meant a live agent retrying a dead address for ever, with no way to
+    /// learn the new one. Observed on a real run: the agent noticed within a minute, built itself a
+    /// disk queue so the hunt would not block, and started filling it for an endpoint that was
+    /// never coming back.
+    ///
+    /// So both are carried across: the previous port is reused when it is still free, and the token
+    /// with it. A restart then costs a running agent one refused connection instead of the session.
+    ///
+    /// The cost, stated rather than hidden: the token now outlives a single run of the process. It
+    /// already lives in <c>bridge.json</c> for anything on this machine that can read the operator's
+    /// files, so the exposure is the same set of readers for longer — and the alternative was a tool
+    /// that severs its own agents every time it is rebuilt.
+    /// </remarks>
     public BridgeServer(RolloutHost host, int port = 0)
     {
         _host = host;
-        Port = port == 0 ? FindFreePort() : port;
-        Token = GenerateToken();
+
+        var previous = port == 0 ? PreviousHandshake(host.Paths.BridgeLastFile) : null;
+        var preferred = previous?.Port is > 0 ? previous.Value.Port : PortFor(host.Paths.RepositoryRoot);
+
+        Port = port != 0 ? port
+            : IsFree(preferred) ? preferred
+            : FindFreePort();
+
+        Token = previous is { } t && t.Port == Port && !string.IsNullOrWhiteSpace(t.Token)
+            ? t.Token
+            : GenerateToken();
+
         Endpoint = $"http://127.0.0.1:{Port}";
         _listener.Prefixes.Add(Endpoint + "/");
 
@@ -103,6 +132,14 @@ public sealed class BridgeServer : IAsyncDisposable
 
         Directory.CreateDirectory(_host.Paths.StateRoot);
         File.WriteAllText(_host.Paths.BridgeHandshakeFile, JsonSerializer.Serialize(handshake, Json));
+
+        // The same endpoint and token, in a file nothing deletes. ClearStale removes the handshake
+        // when the process is gone — correctly, because its absence is how every caller knows
+        // nothing is running — and that is exactly the moment the next start needs to read the port
+        // back from somewhere.
+        File.WriteAllText(
+            _host.Paths.BridgeLastFile,
+            JsonSerializer.Serialize(new { endpoint = Endpoint, token = Token }, Json));
     }
 
     private async Task AcceptLoopAsync()
@@ -289,6 +326,14 @@ public sealed class BridgeServer : IAsyncDisposable
                 return;
             }
 
+            // /v1/missions/{id}/questions/{questionId}/answer — matched before the single-segment
+            // switch below, which only ever looks at segments[3].
+            if (segments is [.., "questions", var questionId, "answer"] && method == "POST")
+            {
+                await AnswerAsync(context, engine, questionId).ConfigureAwait(false);
+                return;
+            }
+
             var tail = segments.Length > 3 ? segments[3] : string.Empty;
             switch (tail, method)
             {
@@ -346,6 +391,30 @@ public sealed class BridgeServer : IAsyncDisposable
 
                 case ("launch", "POST"):
                     await RequestLaunchAsync(context, engine).ConfigureAwait(false);
+                    return;
+
+                case ("question", "POST"):
+                    await AskAsync(context, engine).ConfigureAwait(false);
+                    return;
+
+                case ("questions", "GET"):
+                    await WriteAsync(context, HttpStatusCode.OK, new
+                    {
+                        open = engine.Mission.Questions.Where(q => q.IsOpen).Select(q => new
+                        {
+                            id = q.Id,
+                            from = q.From,
+                            question = q.Question,
+                            options = q.Options,
+                            ifUnanswered = q.IfUnanswered,
+                            at = q.At,
+                        }),
+                        answered = engine.Mission.Questions.Count(q => !q.IsOpen),
+                        note =
+                            "Answer with POST /v1/missions/active/questions/<id>/answer. The agent " +
+                            "is not waiting on you — it asked and carried on — so a late answer " +
+                            "still helps and a missing one costs the run nothing.",
+                    }).ConfigureAwait(false);
                     return;
 
                 case ("subagent", "POST"):
@@ -825,19 +894,28 @@ public sealed class BridgeServer : IAsyncDisposable
         // attempts. A channel the agent must remember to poll separately is a channel that goes
         // unread on the run where it mattered.
         var reviews = engine.CollectReviews();
+        var answers = engine.CollectAnswers();
 
         await WriteAsync(context, HttpStatusCode.OK, new
         {
             @continue = decision.Continue,
-            directive = reviews.Count == 0
-                ? decision.Reason
-                : decision.Reason + Environment.NewLine + Environment.NewLine +
-                  string.Join(Environment.NewLine + Environment.NewLine, reviews.Select(r => r.ForAgent())),
+            directive = string.Join(
+                Environment.NewLine + Environment.NewLine,
+                new[] { decision.Reason }
+                    .Concat(answers.Select(a => a.ForAgent()))
+                    .Concat(reviews.Select(r => r.ForAgent()))),
             state = engine.Mission.State.ToString(),
             tier = engine.Mission.EscalationTier,
             attempts = engine.Ledger.Count,
             progressTrend = progress.Trend.ToString().ToLowerInvariant(),
             progressVerdict = progress.Verdict,
+            answers = answers.Select(a => new
+            {
+                id = a.Id,
+                question = a.Question,
+                answer = a.Answer,
+                answeredBy = a.AnsweredBy,
+            }),
             fromSupervisor = reviews.Select(r => new
             {
                 id = r.Id,
@@ -958,6 +1036,107 @@ public sealed class BridgeServer : IAsyncDisposable
                 "Every command you declare from here has to name one of these, or the bridge " +
                 "refuses it and the refusal goes into your ledger. You can narrow this again; you " +
                 "cannot widen it.",
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The agent asking something it cannot settle alone — without stopping.
+    /// </summary>
+    /// <remarks>
+    /// Answers <c>202</c>, and the wording of the reply is load-bearing: nothing is waiting for the
+    /// answer. An agent that reads this as "now block" has reproduced the menu it was given this
+    /// route to replace.
+    /// </remarks>
+    private async Task AskAsync(HttpListenerContext context, MissionEngine engine)
+    {
+        var body = await ReadAsync<QuestionRequest>(context).ConfigureAwait(false);
+
+        if (body is null || string.IsNullOrWhiteSpace(body.Question))
+        {
+            await WriteAsync(context, HttpStatusCode.BadRequest, new ErrorResponse
+            {
+                Error = "'question' is required.",
+                Hint =
+                    "Ask it in a sentence somebody can answer without seeing your output, and say " +
+                    "in 'ifUnanswered' what you will do if nobody replies — a run that cannot go on " +
+                    "without an answer has not asked a question, it has stopped.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        var question = engine.Ask(new AgentQuestion
+        {
+            Id = AgentQuestion.NewId(),
+            From = body.From ?? engine.Mission.AgentId,
+            Question = body.Question.Trim(),
+            Options = body.Options ?? [],
+            IfUnanswered = body.IfUnanswered,
+        });
+
+        Logged?.Invoke($"❓ {question.From} asks: {question.Question}");
+
+        foreach (var option in question.Options)
+        {
+            Logged?.Invoke($"   · {option}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(question.IfUnanswered))
+        {
+            Logged?.Invoke($"   if nobody answers: {question.IfUnanswered}");
+        }
+
+        await WriteAsync(context, HttpStatusCode.Accepted, new
+        {
+            id = question.Id,
+            asked = true,
+            next =
+                "Recorded, and NOTHING IS WAITING ON IT. Carry on with whatever does not depend on " +
+                "the answer; it reaches you on a later /continue if somebody replies. Do not block, " +
+                "and do not print a menu — stopping to wait is the failure this route exists to " +
+                "replace, and it looks identical whether the reason is good or bad.",
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>The supervisor answering. Free text, never limited to the options offered.</summary>
+    /// <remarks>
+    /// ⚠️ The answer is deliberately not validated against <c>Options</c>. An answer that had to be
+    /// one of the agent's choices would let the agent frame the decision it claims to be delegating
+    /// — and on the run this was built for, the right answer began "none of those, and here is what
+    /// you left out".
+    /// </remarks>
+    private async Task AnswerAsync(HttpListenerContext context, MissionEngine engine, string questionId)
+    {
+        var body = await ReadAsync<AnswerRequest>(context).ConfigureAwait(false);
+
+        if (body is null || string.IsNullOrWhiteSpace(body.Answer))
+        {
+            await WriteAsync(context, HttpStatusCode.BadRequest, new ErrorResponse
+            {
+                Error = "'answer' is required.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        var answered = engine.Answer(questionId, body.Answer.Trim(), body.From);
+
+        if (answered is null)
+        {
+            await WriteAsync(context, HttpStatusCode.NotFound, new ErrorResponse
+            {
+                Error = "No open question with that id.",
+                Hint = "GET /v1/missions/active/questions lists the ones still waiting.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        Logged?.Invoke($"💬 {answered.AnsweredBy} answered {answered.Id}: {answered.Answer}");
+
+        await WriteAsync(context, HttpStatusCode.OK, new
+        {
+            id = answered.Id,
+            question = answered.Question,
+            answer = answered.Answer,
+            next = "The agent collects this on its next /continue, once.",
         }).ConfigureAwait(false);
     }
 
@@ -1233,7 +1412,7 @@ public sealed class BridgeServer : IAsyncDisposable
     /// </remarks>
     private async Task SpendAsync(HttpListenerContext context, MissionEngine engine)
     {
-        var verdict = _host.Spend.Evaluate(engine.Mission, _host.Paths.RepositoryRoot);
+        var verdict = _host.SpendOn(engine.Mission);
         var reading = verdict.Reading;
         var cap = engine.Mission.Stop.MaxSpendUsd;
 
@@ -1629,6 +1808,99 @@ public sealed class BridgeServer : IAsyncDisposable
     }
 
     private static string GenerateToken() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
+
+    /// <summary>
+    /// The port this repository gets by default: the same one every time, and a different one from
+    /// the repository next door.
+    /// </summary>
+    /// <remarks>
+    /// Derived from the repository path rather than fixed as a constant, because both halves of the
+    /// operator's requirement have to hold at once:
+    ///
+    /// <list type="bullet">
+    /// <item><b>Same repository, same port, every restart.</b> A live agent holds the endpoint as an
+    /// environment variable taken at launch, and this project's own build rule kills the exe before
+    /// compiling — so a moving port severs every working agent, permanently.</item>
+    /// <item><b>Different repositories, different ports.</b> Several supervisors on several
+    /// repositories run at once, and one RolloutLoud owns one repository. A single hardcoded port
+    /// would make the second one fail to start, or worse, make two of them fight over the same
+    /// listener and hand agents a token scoped to the wrong host.</item>
+    /// </list>
+    ///
+    /// The range is the IANA dynamic/private block, which is where a program with no registered
+    /// service belongs. A collision with something else on the machine is still possible — that is
+    /// what <see cref="IsFree"/> and the fallback are for, and the port that actually got used is
+    /// written down so the next restart reuses <em>that</em> rather than colliding again.
+    /// </remarks>
+    private static int PortFor(string repositoryRoot)
+    {
+        var canonical = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repositoryRoot))
+            .ToLowerInvariant();
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+        var offset = (hash[0] << 8 | hash[1]) % (65535 - 49152);
+
+        return 49152 + offset;
+    }
+
+    /// <summary>The port and token the last run published, or null when there was none.</summary>
+    /// <remarks>
+    /// Read from the handshake file rather than remembered in the process, because the whole point
+    /// is to survive the process ending. Every failure path returns null and a fresh port is
+    /// chosen: a malformed handshake must never stop RolloutLoud from starting.
+    /// </remarks>
+    private static (int Port, string? Token)? PreviousHandshake(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var root = document.RootElement;
+
+            if (!root.TryGetProperty("endpoint", out var endpoint) ||
+                endpoint.ValueKind != JsonValueKind.String ||
+                !Uri.TryCreate(endpoint.GetString(), UriKind.Absolute, out var uri))
+            {
+                return null;
+            }
+
+            var token = root.TryGetProperty("token", out var t) && t.ValueKind == JsonValueKind.String
+                ? t.GetString()
+                : null;
+
+            return (uri.Port, token);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether a port can still be bound.
+    /// </summary>
+    /// <remarks>
+    /// Asked by binding it, because that is the only answer that is not a race with something else
+    /// on the machine. A port that was ours a minute ago can belong to anything now.
+    /// </remarks>
+    private static bool IsFree(int port)
+    {
+        try
+        {
+            var probe = new TcpListener(IPAddress.Loopback, port);
+            probe.Start();
+            probe.Stop();
+            return true;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+    }
 
     private static int FindFreePort()
     {

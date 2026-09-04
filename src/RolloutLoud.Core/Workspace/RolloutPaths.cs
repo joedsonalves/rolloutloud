@@ -27,6 +27,18 @@ public sealed class RolloutPaths
     public string ButtonsFile => Path.Combine(StateRoot, "buttons.json");
     public string AllowlistFile => Path.Combine(StateRoot, "allowlist.json");
     public string BridgeHandshakeFile => Path.Combine(StateRoot, "bridge.json");
+
+    /// <summary>
+    /// The port and token the last run used, kept so a restart can take them back.
+    /// </summary>
+    /// <remarks>
+    /// A second file rather than keeping the handshake around, because the handshake's absence is a
+    /// contract: it means "nothing is running", and every caller relies on it — <c>ClearStale</c>
+    /// deletes it precisely so a ghost cannot send agents to a dead port. Leaving it in place with
+    /// a flag would turn a clear "no RolloutLoud here" into a connection error somewhere further
+    /// down, which is a worse message arriving later.
+    /// </remarks>
+    public string BridgeLastFile => Path.Combine(StateRoot, "bridge.last.json");
     public string AgentsFile => Path.Combine(StateRoot, "agents.json");
 
     /// <summary>
