@@ -70,6 +70,9 @@ public sealed record MissionProposal
     /// <summary>Dollars the run may spend. Null means no money cap.</summary>
     public decimal? MaxSpendUsd { get; init; }
 
+    /// <summary>Where the agent will work, when that is not RolloutLoud's anchor.</summary>
+    public string? WorkingDirectory { get; init; }
+
     public string? Offload { get; init; }
 
     /// <summary>
@@ -156,6 +159,7 @@ public sealed record MissionProposal
             MaxWallClock = TimeSpan.FromHours(MaxHours is > 0 ? MaxHours.Value : 6),
             MaxSpendUsd = MaxSpendUsd is > 0m ? MaxSpendUsd : null,
         },
+        WorkingDirectory = WorkingDirectory,
         Offload = new OffloadSettings
         {
             Trigger = Offload?.ToLowerInvariant() switch

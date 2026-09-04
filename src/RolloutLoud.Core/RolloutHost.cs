@@ -327,6 +327,48 @@ public sealed class RolloutHost
     /// </remarks>
     public const string ShutdownButtonCommand = "rolloutloud:shutdown";
 
+    /// <summary>
+    /// Sentinel for "open this agent on this mission, in the folder the mission names".
+    /// </summary>
+    /// <remarks>
+    /// A sentinel rather than a real command line, for the same two reasons the shutdown button is
+    /// one: it never reaches a shell, and it can never be reached through the allowlist — no
+    /// pattern an operator writes can make leaving the anchor automatic, because the click is the
+    /// consent.
+    ///
+    /// Shaped <c>rolloutloud:launch:&lt;agent&gt;:&lt;normal|elevated&gt;</c>.
+    /// </remarks>
+    public const string LaunchButtonPrefix = "rolloutloud:launch:";
+
+    /// <summary>
+    /// Asks the operator to open an agent on a mission whose work is outside the anchor.
+    /// </summary>
+    /// <remarks>
+    /// The anchor rule is otherwise absolute — every CLI and every button opens where RolloutLoud
+    /// was started. Crossing it means writing a mission block into another repository's instruction
+    /// file and starting a process there, and neither is something a tool does because an agent
+    /// asked. So it becomes a button: the mechanism this product already uses for "a human decides
+    /// this one", with the destination and the file that will be written spelled out on it.
+    /// </remarks>
+    public FluidButton RequestLaunch(MissionEngine mission, AgentDescriptor agent, LaunchMode mode)
+    {
+        var where = Path.GetFullPath(mission.Mission.WorkingDirectory ?? Paths.RepositoryRoot);
+
+        return CreateButton(new FluidButton
+        {
+            Id = "btn-launch-" + Guid.NewGuid().ToString("N")[..6],
+            Title = $"Open {agent.DisplayName} in {Path.GetFileName(where)} on this mission",
+            Command = LaunchButtonPrefix + agent.Id + ":" + mode.ToString().ToLowerInvariant(),
+            Rationale =
+                $"This mission works in {where}, which is not the folder RolloutLoud is anchored to. " +
+                $"Clicking writes the mission block into {Path.Combine(where, agent.InstructionFile)} " +
+                $"— that file only, rewritten — and opens {agent.DisplayName} there" +
+                (mode == LaunchMode.Elevated ? " with its approval prompts off." : "."),
+            RequestedBy = mission.Mission.AgentId,
+            MissionId = mission.Mission.Id,
+        });
+    }
+
     /// <summary>Whether an identity has been lent at all. Never exposes the contents.</summary>
     public bool HasAttachedIdentity => AttachedIdentity.Load(Paths.IdentityFile) is { IsUsable: true };
 
@@ -581,6 +623,9 @@ public sealed class RolloutHost
     /// <summary>Raised when an agent proposes a mission, so the window can come forward.</summary>
     public event Action<MissionProposal>? ProposalArrived;
 
+    /// <summary>Things the host did that belong in the operator's activity log.</summary>
+    public event Action<string>? Logged;
+
     public void SetActiveMission(string missionId)
     {
         lock (_gate)
@@ -609,11 +654,27 @@ public sealed class RolloutHost
     /// </remarks>
     public void LaunchAgent(AgentDescriptor agent, LaunchMode mode, MissionEngine? mission)
     {
+        // Where the agent works, which is the anchor unless the mission says otherwise. The
+        // briefing and the process both follow it: writing the mission block here and starting the
+        // process there would put an agent in one repository reading a mission from another, which
+        // is worse than either alone.
+        var workingDirectory = mission?.Mission.WorkingDirectory is { Length: > 0 } elsewhere
+            ? Path.GetFullPath(elsewhere)
+            : Paths.RepositoryRoot;
+
         if (mission is not null)
         {
             var briefing = Offload.BriefingComposer.ForMainSession(mission.Mission, mission.Ledger, HasAttachedIdentity);
-            var target = Path.Combine(Paths.RepositoryRoot, agent.InstructionFile);
+            var target = Path.Combine(workingDirectory, agent.InstructionFile);
             WriteBriefingSection(target, briefing);
+
+            if (mission.Mission.WorksElsewhere(Paths.RepositoryRoot))
+            {
+                // Said out loud every time. The tool has just written into a repository that is not
+                // the one it was started in, and that is exactly the kind of side effect an
+                // operator should never have to go looking for.
+                Logged?.Invoke($"Wrote the mission block to {target} and opened {agent.DisplayName} there.");
+            }
 
             // A launch is a fresh session, so the running estimate starts over rather than
             // carrying the previous one's total into a window that no longer holds it.
@@ -625,7 +686,7 @@ public sealed class RolloutHost
         {
             Executable = agent.Executable,
             Arguments = agent.ArgumentsFor(mode),
-            WorkingDirectory = Paths.RepositoryRoot,
+            WorkingDirectory = workingDirectory,
             InTerminal = true,
             Environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -714,7 +775,44 @@ public sealed class RolloutHost
             }
 
             ShutdownApproved?.Invoke("Operator clicked the shutdown button.");
-            return button with { Status = ButtonStatus.Succeeded, OutputExcerpt = "Closing." };
+            return Settle(button, ButtonStatus.Succeeded, "Closing.");
+        }
+
+        // Same shape, and the same reason for being a sentinel: leaving the anchor writes into
+        // another repository and starts a process there, so it must never be reachable by an
+        // allowlist pattern. The operator's click IS the consent, so there is nothing an agent can
+        // add to make this automatic.
+        if (button.Command.StartsWith(LaunchButtonPrefix, StringComparison.Ordinal))
+        {
+            if (!byOperator)
+            {
+                throw new UnauthorizedAccessException(
+                    "Opening an agent outside the anchor is the operator's click, always. No " +
+                    "allowlist pattern reaches this — the click is what consents to writing into " +
+                    "another repository.");
+            }
+
+            var parts = button.Command[LaunchButtonPrefix.Length..].Split(':');
+            var descriptor = parts.Length > 0 ? FindAgent(parts[0]) : null;
+
+            if (descriptor is null)
+            {
+                return Settle(button, ButtonStatus.Failed, $"No agent '{(parts.Length > 0 ? parts[0] : "?")}'.");
+            }
+
+            var engine = button.MissionId is null ? null : FindMission(button.MissionId);
+            if (engine is null)
+            {
+                return Settle(button, ButtonStatus.Failed, "That mission is no longer open.");
+            }
+
+            var mode = parts.Length > 1 && parts[1] == "elevated" ? LaunchMode.Elevated : LaunchMode.Normal;
+            LaunchAgent(descriptor, mode, engine);
+
+            return Settle(
+                button,
+                ButtonStatus.Succeeded,
+                $"Opened {descriptor.DisplayName} in {engine.Mission.WorkingDirectory ?? Paths.RepositoryRoot}.");
         }
 
         // Outside the lock: this can take minutes, and holding the lock would stall the UI and
@@ -771,6 +869,29 @@ public sealed class RolloutHost
         PersistButtons();
         StateChanged?.Invoke();
         return button;
+    }
+
+    /// <summary>
+    /// Records the outcome of a sentinel button, which never reaches a shell.
+    /// </summary>
+    /// <remarks>
+    /// Stores, persists and notifies, rather than only returning the new value. A sentinel that
+    /// returns a settled button without writing it back leaves the window showing "Running" for a
+    /// thing that finished — and, worse, leaves it open across a restart, so a launch that already
+    /// happened comes back asking to happen again.
+    /// </remarks>
+    private FluidButton Settle(FluidButton button, ButtonStatus status, string detail)
+    {
+        var settled = button with { Status = status, OutputExcerpt = detail };
+
+        lock (_gate)
+        {
+            _buttons[settled.Id] = settled;
+        }
+
+        PersistButtons();
+        StateChanged?.Invoke();
+        return settled;
     }
 
     public void DismissButton(string buttonId)

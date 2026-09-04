@@ -288,6 +288,26 @@ you could not see coming.
 ⚠️ **It is a reading, not a lever.** Nothing here raises your own budget. Reaching `capUsd` ends the
 mission as `Exhausted` on your next `/continue`, and only the operator can raise it.
 
+### Pointing a mission at another repository
+
+`workingDirectory` on `POST /v1/missions` says where the agent will actually open, when that is not
+RolloutLoud's anchor. **It opens nothing.** Crossing out of the anchor means writing the mission
+block into another repository's instruction file and starting a process there, so the response comes
+back with a `launch` block naming a button, and the operator clicks it:
+
+```json
+{ "mission": { … },
+  "launch": { "buttonId": "btn-launch-33fea8",
+              "title": "Open Claude Code in PENTEST on this mission",
+              "workingDirectory": "C:\\JOEDSON\\PROGRAMACAO\\PENTEST" } }
+```
+
+No allowlist pattern reaches that button — the click is the consent. Do not wait on it if nobody is
+at the machine.
+
+The directory has to exist; a missing one is refused when the mission is created, while you are
+still looking at the command you typed.
+
 ### `GET /v1/missions/active/wall` — what is being kept from me?
 
 A **Fourth Wall** mission withholds its raw material from whoever reads it through the bridge:

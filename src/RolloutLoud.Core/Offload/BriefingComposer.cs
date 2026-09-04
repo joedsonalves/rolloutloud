@@ -141,6 +141,30 @@ public static class BriefingComposer
         sb.AppendLine(UntrustedText.Fence(ledger.Summarize(hideCommands: mission.FourthWall), "ledger"));
         sb.AppendLine();
 
+        if (!string.IsNullOrWhiteSpace(mission.WorkingDirectory))
+        {
+            // The agent is opening in a repository RolloutLoud does not own and knows nothing
+            // about. Its standing rules and its long-term notes are the first thing that matters,
+            // and nothing auto-loads them — CLAUDE.md and CLAUDE.local.md are read at startup, but
+            // a file called LEIA-PRIMEIRO.md is not. So they are named, from what is actually
+            // there, rather than assumed.
+            sb.AppendLine("## Read this repository before your first attempt");
+            sb.AppendLine();
+            sb.AppendLine(
+                "You are working in a repository that has its own standing rules and its own " +
+                "long-term notes, and they outrank anything you would infer from the code. Read " +
+                "them first, and if they contradict this briefing, the rules are the part to raise " +
+                "rather than the part to ignore.");
+            sb.AppendLine();
+
+            foreach (var entry in RulesIn(mission.WorkingDirectory))
+            {
+                sb.AppendLine($"- `{entry}`");
+            }
+
+            sb.AppendLine();
+        }
+
         if (mission.FourthWall)
         {
             // Outside the fence: RolloutLoud speaking about how this run is being watched, not
@@ -264,5 +288,48 @@ public static class BriefingComposer
             "Anything outside this is out of bounds regardless of how promising it looks, and the " +
             "bridge will refuse it. Persistence applies to the objective, never to the boundary.");
         sb.AppendLine();
+    }
+
+    /// <summary>
+    /// The rules and notes a foreign repository keeps at its top level, named rather than assumed.
+    /// </summary>
+    /// <remarks>
+    /// Listed from what is actually on disk, because the alternative is inventing filenames — and a
+    /// briefing that tells an agent to read <c>CONTRIBUTING.md</c> in a repository that has no such
+    /// file teaches it that this document guesses.
+    ///
+    /// Top-level markdown and the directories beside it, capped, newest-looking first by name so
+    /// the listing is stable between launches. Directories are included because a repository's
+    /// long-term notes usually live in one, and a vault is exactly the thing an agent should open
+    /// before its first attempt rather than after its tenth.
+    /// </remarks>
+    private static IReadOnlyList<string> RulesIn(string directory)
+    {
+        try
+        {
+            var root = new DirectoryInfo(directory);
+
+            var files = root
+                .EnumerateFiles("*.md")
+                .Select(f => f.Name)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .Take(12);
+
+            var folders = root
+                .EnumerateDirectories()
+                .Where(d => !d.Name.StartsWith('.') && !d.Name.StartsWith('_'))
+                .Select(d => d.Name + "/")
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .Take(12);
+
+            return [.. files, .. folders];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A briefing is worth composing even when the folder cannot be listed. The agent is
+            // about to open there and can look for itself; a thrown exception would lose the
+            // mission instead.
+            return [];
+        }
     }
 }

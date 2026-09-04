@@ -159,6 +159,89 @@ public class FourthWallTests
         Assert.Equal(0, audit.For("m1"));
     }
 
+    // ---- the room on the other side of the wall -----------------------------------------------
+
+    [Fact]
+    public void A_mission_knows_when_it_works_outside_the_anchor()
+    {
+        // The half that makes the wall physical rather than editorial: redaction keeps raw material
+        // out of a supervisor's replies, but putting the worker in another repository in its own
+        // process means it was never in reach to begin with.
+        var anchor = Path.Combine(Path.GetTempPath(), "anchor");
+        var elsewhere = Path.Combine(Path.GetTempPath(), "somewhere-else");
+
+        Assert.False(Mission(wall: true).WorksElsewhere(anchor));
+        Assert.False((Mission(wall: true) with { WorkingDirectory = anchor }).WorksElsewhere(anchor));
+        Assert.True((Mission(wall: true) with { WorkingDirectory = elsewhere }).WorksElsewhere(anchor));
+    }
+
+    [Theory]
+    [InlineData("anchor")]
+    [InlineData("anchor/")]
+    [InlineData("anchor\\")]
+    public void The_same_folder_written_differently_is_still_the_same_folder(string spelling)
+    {
+        // ⚠️ A trailing separator would otherwise make a mission "work elsewhere" in its own anchor,
+        // which produces a button asking the operator to consent to opening where the agent already
+        // is — consent theatre, and the fastest way to teach someone to click without reading.
+        var anchor = Path.Combine(Path.GetTempPath(), "anchor");
+        var written = Path.Combine(Path.GetTempPath(), spelling.Replace('/', Path.DirectorySeparatorChar));
+
+        Assert.False((Mission(wall: true) with { WorkingDirectory = written }).WorksElsewhere(anchor));
+    }
+
+    [Fact]
+    public void The_briefing_names_the_foreign_repositorys_own_rules()
+    {
+        // Listed from what is actually on disk, never assumed. A briefing that tells an agent to
+        // read a file the repository does not have teaches it that this document guesses — and
+        // nothing auto-loads a file called LEIA-PRIMEIRO.md the way CLAUDE.md is auto-loaded.
+        var folder = Path.Combine(Path.GetTempPath(), "rlwork-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(Path.Combine(folder, "ESCOPOS"));
+        File.WriteAllText(Path.Combine(folder, "LEIA-PRIMEIRO.md"), "rules");
+        File.WriteAllText(Path.Combine(folder, "PADRAO-ATAQUE-INICIAL.md"), "playbook");
+
+        try
+        {
+            var briefing = BriefingComposer.ForMainSession(
+                Mission(wall: true) with { WorkingDirectory = folder },
+                new MissionLedger("m1"),
+                identityAttached: false);
+
+            Assert.Contains("Read this repository before your first attempt", briefing, StringComparison.Ordinal);
+            Assert.Contains("LEIA-PRIMEIRO.md", briefing, StringComparison.Ordinal);
+            Assert.Contains("PADRAO-ATAQUE-INICIAL.md", briefing, StringComparison.Ordinal);
+            Assert.Contains("ESCOPOS/", briefing, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void A_mission_that_stays_home_says_nothing_about_reading_a_repository()
+    {
+        var briefing = BriefingComposer.ForMainSession(
+            Mission(wall: true), new MissionLedger("m1"), identityAttached: false);
+
+        Assert.DoesNotContain("Read this repository before", briefing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void An_unlistable_folder_still_produces_a_briefing()
+    {
+        // The mission is worth composing even when the folder cannot be read: the agent is about to
+        // open there and can look for itself, and throwing would lose the mission instead.
+        var briefing = BriefingComposer.ForMainSession(
+            Mission(wall: true) with { WorkingDirectory = Path.Combine(Path.GetTempPath(), "not-there-" + Guid.NewGuid()) },
+            new MissionLedger("m1"),
+            identityAttached: false);
+
+        Assert.Contains("Read this repository before your first attempt", briefing, StringComparison.Ordinal);
+        Assert.Contains("reach a critical", briefing, StringComparison.Ordinal);
+    }
+
     // ---- authorisation --------------------------------------------------------------------------
 
     [Fact]

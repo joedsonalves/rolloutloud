@@ -75,6 +75,33 @@ public sealed record Mission
     /// </remarks>
     public string? Deliverable { get; init; }
 
+    /// <summary>
+    /// Where the agent actually works, when that is not the folder RolloutLoud is anchored to.
+    /// </summary>
+    /// <remarks>
+    /// This is the half of <see cref="FourthWall"/> that makes the wall physical rather than
+    /// editorial. Redacting the bridge keeps raw material out of a supervisor's replies; putting
+    /// the worker in <em>another repository, in its own process</em> means the material was never
+    /// in the supervising session's reach to begin with. The redaction is then the backstop for
+    /// what comes back through the bridge, not the whole mechanism.
+    ///
+    /// ⚠️ <b>It is a deliberate exception to the anchor rule</b>, which is otherwise absolute: the
+    /// folder RolloutLoud was started in is where every CLI and every fluid button opens. Crossing
+    /// out of it means RolloutLoud writes the mission block into <em>another</em> repository's
+    /// instruction file and starts a process there, and neither of those is something a tool should
+    /// do because an agent asked nicely. So a mission that names one of these produces a button and
+    /// waits for the operator, the same way anything else that needs a human does.
+    /// </remarks>
+    public string? WorkingDirectory { get; init; }
+
+    /// <summary>Whether the agent will work somewhere other than RolloutLoud's own anchor.</summary>
+    public bool WorksElsewhere(string anchor) =>
+        !string.IsNullOrWhiteSpace(WorkingDirectory) &&
+        !string.Equals(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(WorkingDirectory)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(anchor)),
+            StringComparison.OrdinalIgnoreCase);
+
     public OffloadSettings Offload { get; init; } = new();
 
     /// <summary>Escalation tier reached so far. See <see cref="EscalationLadder"/>.</summary>
