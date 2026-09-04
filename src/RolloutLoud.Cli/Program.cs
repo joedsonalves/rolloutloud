@@ -35,6 +35,7 @@ internal static class Program
             "propose" => await ProposeAsync(paths, rest).ConfigureAwait(false),
             "ledger" => await LedgerAsync(paths, rest).ConfigureAwait(false),
             "spend" => await SimpleGetAsync(paths, "/v1/missions/active/spend").ConfigureAwait(false),
+            "wall" => await SimpleGetAsync(paths, "/v1/missions/active/wall").ConfigureAwait(false),
             "status" => await StatusAsync(paths).ConfigureAwait(false),
             "mission" => await MissionAsync(paths, rest).ConfigureAwait(false),
             "briefing" => await BriefingAsync(paths, rest).ConfigureAwait(false),
@@ -354,7 +355,8 @@ internal static class Program
         {
             Console.Error.WriteLine("Usage: rollout mission \"<objective>\" [--agent claude] [--gate \"<cmd>\"] " +
                                     "[--scope a,b] [--auth \"<who authorised it>\"] [--offload always|threshold] " +
-                                    "[--max-attempts N] [--max-hours N] [--max-spend USD]");
+                                    "[--max-attempts N] [--max-hours N] [--max-spend USD] " +
+                                    "[--fourth-wall] [--deliverable <path>]");
             return 1;
         }
 
@@ -387,6 +389,16 @@ internal static class Program
         if (decimal.TryParse(SpendCap(args), out var spend))
         {
             payload["maxSpendUsd"] = spend;
+        }
+
+        if (args.Contains("--fourth-wall"))
+        {
+            payload["fourthWall"] = true;
+        }
+
+        if (Option(args, "--deliverable") is { Length: > 0 } deliverable)
+        {
+            payload["deliverable"] = deliverable;
         }
 
         return await SendAsync(paths, client => client.PostAsync("/v1/missions", payload)).ConfigureAwait(false);
@@ -858,6 +870,12 @@ internal static class Program
                                              [--scope a,b] [--auth "<who authorised it>"]
                                              [--offload always|threshold]
                                              [--max-attempts N] [--max-hours N] [--max-spend USD]
+                                             [--fourth-wall] [--deliverable <path>]
+                                             --fourth-wall denies whoever supervises this run its
+                                             raw material: no argv, no exit codes, no artifact
+                                             folders, no button output. The deliverable is the one
+                                             thing behind the wall they are meant to read. With
+                                             declared targets it REQUIRES --auth.
               rollout briefing ["<subagent task>"]   The briefing; with a task, the subagent form.
               rollout admit "<hypothesis>" "<command>"
                                              Ask before running. Rejects repeats and out-of-scope.
@@ -881,6 +899,9 @@ internal static class Program
                                              What has already been tried. Filtered and paged —
                                              there is no way to fetch the lot, on purpose.
               rollout spend                    What this mission has cost so far, against its cap.
+              rollout wall                     What a Fourth Wall mission is withholding, and how
+                                             much of it. Read this before mistaking absence for
+                                             evidence.
               rollout continue                 Whether you may stop. Almost always: no.
               rollout gate                     Ask the success gate. The only way a mission ends.
 

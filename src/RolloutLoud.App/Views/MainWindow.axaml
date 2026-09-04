@@ -314,6 +314,25 @@
             </StackPanel>
           </Border>
 
+          <!-- The Fourth Wall. Sits with the mission settings rather than with the brakes: it is
+               not a budget, it is a decision about how much of your own run a supervising session
+               gets to read — and that decision stays on the operator's side of the line. -->
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{loc:Tr Key=wall.title}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{loc:Tr Key=wall.hint}" Classes="hint" />
+
+              <CheckBox IsChecked="{Binding FourthWall}" Content="{loc:Tr Key=wall.enable}" />
+
+              <TextBox Text="{Binding Deliverable}" IsEnabled="{Binding FourthWall}"
+                       PlaceholderText="{loc:Tr Key=wall.deliverable.placeholder}" />
+              <TextBlock Text="{loc:Tr Key=wall.deliverable.hint}" Classes="hint" />
+
+              <TextBlock Text="{Binding WallSummary}" Classes="hint" />
+              <TextBlock Text="{loc:Tr Key=wall.caveat}" Classes="hint" />
+            </StackPanel>
+          </Border>
+
           <WrapPanel Margin="0,4,0,10">
             <Button Content="{loc:Tr Key=action.start}" Command="{Binding StartMission}" Padding="18,10" FontWeight="SemiBold" Margin="0,0,8,8" />
             <Button Content="{Binding PauseLabel}" Command="{Binding PauseMission}" Padding="14,10" Margin="0,0,8,8" />

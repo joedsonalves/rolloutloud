@@ -99,6 +99,9 @@ public sealed class RolloutHost
     /// <summary>What a mission has spent, and whether that is past its cap.</summary>
     public SpendMeter Spend { get; }
 
+    /// <summary>How much each Fourth Wall mission has kept from whoever is steering it.</summary>
+    public FourthWallAudit Wall { get; } = new();
+
     /// <summary>The current price list, re-read whenever pricing.json changes.</summary>
     /// <remarks>
     /// Live for the same reason the allowlist and the agent catalogue are: the operator corrects a

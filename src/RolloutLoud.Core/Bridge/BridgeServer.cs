@@ -332,6 +332,10 @@ public sealed class BridgeServer : IAsyncDisposable
                     await SpendAsync(context, engine).ConfigureAwait(false);
                     return;
 
+                case ("wall", "GET"):
+                    await WallAsync(context, engine).ConfigureAwait(false);
+                    return;
+
                 case ("subagent", "POST"):
                     await SubagentAsync(context, engine).ConfigureAwait(false);
                     return;
@@ -537,6 +541,24 @@ public sealed class BridgeServer : IAsyncDisposable
             }
             : MissionScope.Unrestricted;
 
+        // ⚠️ Refused, not warned. Everywhere else a declared target with no recorded authorisation
+        // is amber and the run opens anyway — the operator is watching the traffic and can catch
+        // drift themselves. Behind the Fourth Wall nobody is watching the traffic, by design. The
+        // written record is the only thing left that makes the run attributable afterwards, so it
+        // stops being optional at exactly the point it starts carrying the weight alone.
+        if (body.FourthWall == true && scope.NeedsAuthorization)
+        {
+            await WriteAsync(context, HttpStatusCode.BadRequest, new ErrorResponse
+            {
+                Error = "A Fourth Wall mission with declared targets needs an authorisation on record.",
+                Hint =
+                    "Pass 'authorization' naming who approved reaching these targets and under what " +
+                    "reference. Elsewhere this is a warning; here it is required, because nobody is " +
+                    "reading the raw traffic and the record is what makes the run attributable later.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
         var gate = string.IsNullOrWhiteSpace(body.GateCommand)
             ? SuccessGate.OperatorJudged with { Description = body.GateDescription }
             : new SuccessGate
@@ -553,6 +575,8 @@ public sealed class BridgeServer : IAsyncDisposable
             AgentId = agentId,
             Gate = gate,
             Scope = scope,
+            FourthWall = body.FourthWall == true,
+            Deliverable = body.Deliverable,
             Stop = new StopConditions
             {
                 MaxAttempts = body.MaxAttempts is > 0 ? body.MaxAttempts.Value : 200,
@@ -1105,6 +1129,22 @@ public sealed class BridgeServer : IAsyncDisposable
     private async Task QueryLedgerAsync(HttpListenerContext context, MissionEngine engine)
     {
         var q = context.Request.QueryString;
+        var wall = engine.Mission.FourthWall;
+
+        // Refused rather than quietly ignored. Silently downgrading full=true would let a caller
+        // believe it had the argv and act on its absence as if it were an empty command — and the
+        // whole point of this mode is that the boundary is legible, not that it is invisible.
+        if (wall && string.Equals(q["full"], "true", StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteAsync(context, HttpStatusCode.Forbidden, new
+            {
+                error = "Fourth Wall: --full is refused on this mission.",
+                hint = FourthWall.FullRefused,
+                deliverable = engine.Mission.Deliverable,
+                withheldSoFar = _host.Wall.For(engine.Mission.Id),
+            }).ConfigureAwait(false);
+            return;
+        }
 
         var query = new LedgerQuery
         {
@@ -1120,7 +1160,51 @@ public sealed class BridgeServer : IAsyncDisposable
 
         var result = LedgerQueryRunner.Run(engine.Ledger.Attempts, query);
 
+        if (wall)
+        {
+            // Redacted even without full=true, because the entry shape is the same either way and
+            // a mode that only holds when asked politely is not a mode.
+            result = result with
+            {
+                Entries = [.. result.Entries.Select(FourthWall.Redact)],
+                Guidance = result.Guidance + " Fourth Wall: the argv, exit codes and artifact " +
+                           "folders are withheld on this mission.",
+            };
+
+            _host.Wall.Record(engine.Mission.Id, result.Entries.Count * FourthWall.FieldsPerEntry);
+        }
+
         await WriteAsync(context, HttpStatusCode.OK, result).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// What this mission is keeping from whoever is steering it, and how much of it.
+    /// </summary>
+    /// <remarks>
+    /// The counterweight to the guard-rail caveat. A supervisor working behind the wall needs to
+    /// know the <em>shape</em> of what it cannot see, or it will mistake absence for evidence — and
+    /// the operator's question about this mode is always "how much did it not see?". A wall whose
+    /// height nobody can state is one people quietly stop believing in.
+    /// </remarks>
+    private async Task WallAsync(HttpListenerContext context, MissionEngine engine)
+    {
+        var mission = engine.Mission;
+
+        await WriteAsync(context, HttpStatusCode.OK, new
+        {
+            fourthWall = mission.FourthWall,
+            deliverable = mission.Deliverable,
+            withheldFields = _host.Wall.For(mission.Id),
+            withheld = mission.FourthWall
+                ? new[] { "attempt command lines", "exit codes", "artifact folders", "fluid button output" }
+                : [],
+            note = mission.FourthWall
+                ? "You get the hypothesis, what each attempt ruled out, the gate and the deliverable. " +
+                  "Everything else is the raw material this mode keeps out of your context. Ask the " +
+                  "agent rather than going around it — and if you do go around it, say so, because " +
+                  "this is a guard rail on the bridge and not a sandbox on the disk."
+                : "This mission is not in Fourth Wall mode. Nothing is being withheld.",
+        }).ConfigureAwait(false);
     }
 
     private async Task CreateButtonAsync(HttpListenerContext context)
@@ -1190,14 +1274,29 @@ public sealed class BridgeServer : IAsyncDisposable
                 : "Not on the allowlist — the operator has to click this one. Do not wait on it if " +
                   "nobody is at the machine; carry on with what you can do without it.";
 
+        // A button's output excerpt is raw command output — the most direct raw material there is,
+        // and on a pentest run it is target-controlled text. Behind the wall it is withheld and the
+        // exit code goes with it, because "it exited 1" plus a hypothesis is enough to know the
+        // attempt failed, and the difference between exit 1 and exit 7 only means something to
+        // whoever can read the output that explains it.
+        var wall = button.MissionId is { } id && _host.FindMission(id)?.Mission.FourthWall == true;
+
+        if (wall)
+        {
+            _host.Wall.Record(button.MissionId!, 2);
+        }
+
         return new ButtonResponse
         {
             Id = button.Id,
             Status = button.Status.ToString(),
             AutoInvokable = auto,
-            Guidance = guidance,
-            ExitCode = button.ExitCode,
-            Output = button.OutputExcerpt,
+            Guidance = wall
+                ? guidance + " Fourth Wall: this button's output and exit code are withheld — the " +
+                  "status says whether it ran, and the agent has the rest."
+                : guidance,
+            ExitCode = wall ? null : button.ExitCode,
+            Output = wall ? null : button.OutputExcerpt,
         };
     }
 
