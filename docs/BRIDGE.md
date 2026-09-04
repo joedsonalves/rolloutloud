@@ -288,6 +288,29 @@ you could not see coming.
 ⚠️ **It is a reading, not a lever.** Nothing here raises your own budget. Reaching `capUsd` ends the
 mission as `Exhausted` on your next `/continue`, and only the operator can raise it.
 
+### `GET /v1/missions/active/wall` — what is being kept from me?
+
+A **Fourth Wall** mission withholds its raw material from whoever reads it through the bridge:
+command lines, exit codes, artifact folders and fluid button output. You get each attempt's
+hypothesis, what it ruled out, the gate, the spend — and the deliverable, which is the one thing
+behind the wall you are meant to read in full.
+
+```json
+{ "fourthWall": true, "deliverable": "report/DRAFT.md", "withheldFields": 123,
+  "withheld": ["attempt command lines", "exit codes", "artifact folders", "fluid button output"] }
+```
+
+`GET /attempts?full=true` answers **403** here rather than quietly downgrading, because a caller
+that believes it asked for the argv and got nothing back would read the absence as an empty command
+rather than as a boundary.
+
+⚠️ **Ask this before mistaking absence for evidence.** "No artifact folder" on this mission means
+you were not shown one, not that none exists.
+
+If you are the **working** agent on a Fourth Wall mission: whoever is supervising you cannot see
+your output. What reaches them is your `learned` and the deliverable, so write both for someone who
+was not there.
+
 ### `GET /v1/missions/active/continue` — may I stop?
 
 Almost always no. `continue: false` comes from a stop condition or the operator, never from an

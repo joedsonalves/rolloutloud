@@ -279,12 +279,14 @@ rollout open [--elevated]
 rollout status
 
 rollout mission "<objective>" --gate "<command>" --scope a,b --auth "<who authorised it>"  [--max-spend USD]
+                                           [--fourth-wall] [--deliverable <path>]
 rollout propose "<objective>" --gate "<command>" --why "<reasoning>"   you approve it before it runs
 rollout briefing ["<subagent task>"]
 rollout admit    "<hypothesis>" "<command>"
 rollout attempt  "<hypothesis>" "<command>" --outcome failed --learned "…"
 rollout ledger ["<text>"] [--outcome …] [--agent …] [--tier N] [--since …] [--limit N] [--full]
 rollout spend
+rollout wall
 rollout continue
 rollout gate
 
@@ -605,6 +607,83 @@ perfectly well.
 
 If no reset time is given it waits half an hour and tries again. If the window does not reopen for
 longer than the ceiling (six hours by default), it stops and says so rather than sleeping all day.
+
+## Fourth Wall — supervising a run you cannot see
+
+Turn it on when a session is going to **steer** a run rather than work it: you, or another agent
+acting as the reviewer.
+
+```
+rollout mission "reach a critical inside the declared scope" \
+        --gate "test -f findings/critical.json" \
+        --scope "app.example.com" --auth "PO-4471, signed by the programme" \
+        --fourth-wall --deliverable "report/DRAFT.md"
+```
+
+**It is not "you see nothing".** It is *you see the deliverable and the ledger, not the raw
+material* — which is how a reviewer actually works, and roughly what the operator sees looking at
+the window.
+
+| the supervisor gets | the supervisor does not get |
+| ---------------------------------- | ------------------------------------ |
+| each attempt's hypothesis | the command lines |
+| what each attempt ruled out | the exit codes |
+| the gate, the tier, the spend | the artifact folders |
+| the deliverable, in full | fluid button output |
+
+### Why bother
+
+**A supervisor that reads everything is a second worker, not a supervisor.** The whole argument for
+subagent offload is that a fresh process produces better attempts because it does not carry forty
+failures' worth of tunnel vision. That applies at least as much to the session doing the judging —
+and it is the session whose context is most expensive to fill.
+
+**On a pentest, target output is attacker-controlled.** The injection guard exists because that text
+reaches contexts and then persists in the ledger. Keeping the supervising session out of the raw
+traffic takes it out of the blast radius rather than fencing it and hoping.
+
+### The wall has one window, and it is the deliverable
+
+`--deliverable report/DRAFT.md` names the one path behind the wall the supervisor is meant to read.
+Named up front so both sides agree what the work is *for*, rather than the reviewer finding out at
+review time that it was somewhere else. Reading the report and saying what is missing is the job;
+reading the scan output that produced it is not.
+
+### Authorisation stops being optional
+
+Everywhere else, declaring targets with no `--auth` is an amber warning and the run opens anyway —
+you are watching the traffic and can catch drift yourself. **Behind the wall nobody is watching the
+traffic, by design.** The written record is the only thing left that makes the run attributable
+afterwards, so it is refused without one.
+
+### What it costs
+
+The wall is on the mission, not on a session, because the bridge cannot tell a supervising caller
+from a working one — both hold the same token and both may name the same agent. One rule, and no
+way to get the raw material by asking differently.
+
+So the **working agent** also stops seeing the argv echoed back in its ledger. That is affordable:
+exact repeats were never held off by that echo — `Admit` blocks them by fingerprint before anything
+runs — and what stops a repeat of a *kind* of idea is the hypothesis and what it ruled out, both of
+which stay.
+
+It also tells the agent it is being read at a distance, which is free and improves the writing: an
+agent that knows nobody will read its output writes a `learned` worth reading, because that becomes
+the only channel rather than a summary of something the reader could go and check.
+
+```
+rollout wall
+```
+
+says what is being withheld and **how much of it so far**, so a supervisor does not mistake absence
+for evidence and you can state the height of the wall rather than guess at it.
+
+> ⚠️ **A guard rail, not a sandbox — exactly as the scope is.** It redacts what the bridge serves.
+> It cannot stop a supervising session opening a run folder with its own file tools, and nothing in
+> this product could. It exists to stop the honest reach for the transcript, and to make the size of
+> what was withheld something you can point at. A supervisor that goes around it should say so.
+
+---
 
 ## Text the agent did not write
 

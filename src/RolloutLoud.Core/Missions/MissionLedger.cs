@@ -173,7 +173,12 @@ public sealed class MissionLedger
     /// the offload mode exists to avoid — so the briefing gets the shape of what failed, not the
     /// transcript. Full detail stays in the run folders, addressable by id.
     /// </remarks>
-    public string Summarize(int maxEntries = 40)
+    /// <param name="hideCommands">
+    /// Leave the argv out, for a <see cref="FourthWall"/> mission. What stops an agent repeating a
+    /// <em>kind</em> of idea is the hypothesis and what it ruled out; exact repeats were never held
+    /// off by this echo, since <c>Admit</c> blocks them by fingerprint before anything runs.
+    /// </param>
+    public string Summarize(int maxEntries = 40, bool hideCommands = false)
     {
         if (_attempts.Count == 0)
         {
@@ -200,7 +205,11 @@ public sealed class MissionLedger
         {
             var label = attempt.Outcome == AttemptOutcome.Declared ? "IN FLIGHT" : attempt.Outcome.ToString();
             lines.Add($"- [T{attempt.Tier} {label}] {attempt.Hypothesis}");
-            lines.Add($"    ran: {Truncate(attempt.Command, 200)}");
+
+            if (!hideCommands)
+            {
+                lines.Add($"    ran: {Truncate(attempt.Command, 200)}");
+            }
             if (!string.IsNullOrWhiteSpace(attempt.Observation))
             {
                 // Defanged, not fenced per entry. An observation is written by an agent that has

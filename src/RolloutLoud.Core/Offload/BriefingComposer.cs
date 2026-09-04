@@ -138,8 +138,28 @@ public static class BriefingComposer
         sb.AppendLine();
         sb.AppendLine(UntrustedText.Preamble);
         sb.AppendLine();
-        sb.AppendLine(UntrustedText.Fence(ledger.Summarize(), "ledger"));
+        sb.AppendLine(UntrustedText.Fence(ledger.Summarize(hideCommands: mission.FourthWall), "ledger"));
         sb.AppendLine();
+
+        if (mission.FourthWall)
+        {
+            // Outside the fence: RolloutLoud speaking about how this run is being watched, not
+            // recorded output. It goes here rather than at the top because it only makes sense
+            // once the agent has seen that the ledger it is reading has had the argv taken out.
+            sb.AppendLine("## You are being read at a distance");
+            sb.AppendLine();
+            sb.AppendLine(FourthWall.AgentNotice);
+            sb.AppendLine();
+
+            if (!string.IsNullOrWhiteSpace(mission.Deliverable))
+            {
+                sb.AppendLine(
+                    $"The deliverable is `{mission.Deliverable}`. That is the one thing they will " +
+                    "read in full, so it carries the work — write it as you go rather than at the " +
+                    "end, because a run that stops early still has to be worth something.");
+                sb.AppendLine();
+            }
+        }
 
         // Outside the fence: this is the tool speaking, not recorded output. Without it the cap on
         // the summary above reads as "the rest is unavailable" rather than "ask for the part you

@@ -47,6 +47,34 @@ public sealed record Mission
 
     public StopConditions Stop { get; init; } = new();
 
+    /// <summary>
+    /// Whether whoever supervises this run is denied its raw material. See <see cref="FourthWall"/>.
+    /// </summary>
+    /// <remarks>
+    /// A property of the mission rather than of a session, because the bridge cannot tell a
+    /// supervising caller from a working one — both hold the same token and both may name the same
+    /// agent. Making it a mission setting means there is one rule with no way to get the raw
+    /// material by asking differently, which is the only version of this that is worth anything.
+    ///
+    /// The cost is real and worth stating: the working agent also stops seeing the argv echoed back
+    /// in its ledger. It keeps what stops it repeating a <em>kind</em> of idea, and exact repeats
+    /// were never held off by that echo — <c>Admit</c> blocks them by fingerprint.
+    /// </remarks>
+    public bool FourthWall { get; init; }
+
+    /// <summary>
+    /// The one path behind the wall the supervisor is meant to read, relative to the repository.
+    /// </summary>
+    /// <remarks>
+    /// The window in the wall, and the thing that makes this mode usable rather than blind. The
+    /// supervisor reads the report draft and says what is missing; that is reviewing. Reading the
+    /// scan output that produced it is not.
+    ///
+    /// Named on the mission so both sides agree what it is before the work starts, rather than the
+    /// supervisor discovering at review time that the deliverable is somewhere it did not look.
+    /// </remarks>
+    public string? Deliverable { get; init; }
+
     public OffloadSettings Offload { get; init; } = new();
 
     /// <summary>Escalation tier reached so far. See <see cref="EscalationLadder"/>.</summary>

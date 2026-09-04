@@ -262,6 +262,8 @@ public sealed class MainViewModel : Observable
     private int _maxAttempts = 200;
     private double _maxHours = 6;
     private decimal _maxSpendUsd;
+    private bool _fourthWall;
+    private string _deliverable = string.Empty;
     private bool _watchdogEnabled = true;
     private bool _allowUnattendedShutdown;
     private MissionSummaryItem? _selectedMission;
@@ -774,6 +776,52 @@ public sealed class MainViewModel : Observable
     public string SuperviseLabel =>
         Localizer.Current[_supervisor.IsRunning ? "action.stopSupervision" : "action.supervise"];
 
+    /// <summary>
+    /// Deny whoever supervises the run its raw material. See <see cref="Core.Missions.FourthWall"/>.
+    /// </summary>
+    /// <remarks>
+    /// A checkbox on the operator's side rather than only a CLI flag, because the operator is the
+    /// one who decides how much of their own run a supervising session gets to read — and that is
+    /// exactly the kind of decision this product keeps on their side of the line.
+    /// </remarks>
+    public bool FourthWall
+    {
+        get => _fourthWall;
+        set
+        {
+            Set(ref _fourthWall, value);
+            Raise(nameof(WallSummary));
+        }
+    }
+
+    /// <summary>Path of the one thing behind the wall the supervisor is meant to read.</summary>
+    public string Deliverable
+    {
+        get => _deliverable;
+        set => Set(ref _deliverable, value);
+    }
+
+    /// <summary>
+    /// How much the running mission has kept from its supervisor.
+    /// </summary>
+    /// <remarks>
+    /// Shown as a count rather than a badge, because the operator's question about this mode is
+    /// always "how much did it not see?" — and a wall whose height nobody can state is one people
+    /// quietly stop believing in.
+    /// </remarks>
+    public string WallSummary
+    {
+        get
+        {
+            if (_mission is not { Mission.FourthWall: true })
+            {
+                return Localizer.Current["wall.off"];
+            }
+
+            return Localizer.Current.Format("wall.on", _host.Wall.For(_mission.Mission.Id));
+        }
+    }
+
     public string MissionSummary => _mission is null
         ? Localizer.Current["mission.none"]
         : Localizer.Current.Format(
@@ -911,6 +959,8 @@ public sealed class MainViewModel : Observable
                 MaxWallClock = TimeSpan.FromHours(Math.Max(0.1, MaxHours)),
                 MaxSpendUsd = MaxSpendUsd > 0m ? MaxSpendUsd : null,
             },
+            FourthWall = FourthWall,
+            Deliverable = string.IsNullOrWhiteSpace(Deliverable) ? null : Deliverable.Trim(),
             Offload = new OffloadSettings
             {
                 Trigger = !OffloadEnabled
@@ -1204,6 +1254,7 @@ public sealed class MainViewModel : Observable
         Raise(nameof(RelayHistory));
         Raise(nameof(ContextReadingSummary));
         Raise(nameof(SpendSummary));
+        Raise(nameof(WallSummary));
         Raise(nameof(ProgressSummary));
         Raise(nameof(PauseLabel));
         PauseMission.RaiseCanExecuteChanged();
