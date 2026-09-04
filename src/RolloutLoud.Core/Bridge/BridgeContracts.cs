@@ -135,6 +135,28 @@ public sealed record ProposalRequest
     public string? Rationale { get; init; }
 }
 
+/// <summary>
+/// The supervisor saying what the deliverable still needs.
+/// </summary>
+/// <remarks>
+/// The bridge's other direction. Everything else here carries what the agent did; this carries what
+/// somebody reading the result wants next.
+/// </remarks>
+public sealed record ReviewRequest
+{
+    /// <summary>Who is reviewing. A label for the record.</summary>
+    public string? From { get; init; }
+
+    /// <summary>What needs to change, in a sentence the agent can act on.</summary>
+    public required string Note { get; init; }
+
+    /// <summary>The specific gaps. A list survives being skimmed; a paragraph does not.</summary>
+    public IReadOnlyList<string>? Missing { get; init; }
+
+    /// <summary>Deal with it before the next attempt. Never a stop — that is the gate's job.</summary>
+    public bool? Blocking { get; init; }
+}
+
 /// <summary>Declaring an attempt before running it. The hypothesis is required, and that is the point.</summary>
 public sealed record AdmitRequest
 {

@@ -112,6 +112,58 @@ public sealed class MissionEngine
         Persist();
     }
 
+    /// <summary>
+    /// Records what the supervisor asked for after reading the deliverable.
+    /// </summary>
+    /// <remarks>
+    /// Never touches <see cref="MissionState"/>, and that is the line worth holding. A supervisor is
+    /// not a stop condition — the gate and the budgets are — and letting a second model end a run
+    /// would put back the self-judgement this whole product exists to remove. A blocking note means
+    /// "do this next", never "stop".
+    /// </remarks>
+    public SupervisorNote Review(SupervisorNote note)
+    {
+        lock (_gate)
+        {
+            Mission = Mission with { Reviews = [.. Mission.Reviews, note] };
+        }
+
+        Log("review", $"{note.From}: {note.Note}");
+        Persist();
+        return note;
+    }
+
+    /// <summary>
+    /// Hands over every note the agent has not seen, and marks them delivered.
+    /// </summary>
+    /// <remarks>
+    /// Delivered once, kept for ever. Repeating a note on every turn would make the briefing an
+    /// echo chamber and teach the agent to skim past the section; dropping it would lose the record
+    /// of how a run was steered, which behind the wall is the only trace of the steering there is.
+    /// </remarks>
+    public IReadOnlyList<SupervisorNote> CollectReviews()
+    {
+        lock (_gate)
+        {
+            var pending = Mission.Reviews.Where(r => r.IsPending).ToList();
+
+            if (pending.Count == 0)
+            {
+                return [];
+            }
+
+            var now = DateTimeOffset.UtcNow;
+
+            Mission = Mission with
+            {
+                Reviews = [.. Mission.Reviews.Select(r => r.IsPending ? r with { DeliveredAt = now } : r)],
+            };
+
+            Persist();
+            return pending;
+        }
+    }
+
     public void Abort(string reason)
     {
         Mission = Mission with

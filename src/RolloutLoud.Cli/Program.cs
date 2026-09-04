@@ -36,6 +36,7 @@ internal static class Program
             "ledger" => await LedgerAsync(paths, rest).ConfigureAwait(false),
             "spend" => await SimpleGetAsync(paths, "/v1/missions/active/spend").ConfigureAwait(false),
             "wall" => await SimpleGetAsync(paths, "/v1/missions/active/wall").ConfigureAwait(false),
+            "review" => await ReviewAsync(paths, rest).ConfigureAwait(false),
             "status" => await StatusAsync(paths).ConfigureAwait(false),
             "mission" => await MissionAsync(paths, rest).ConfigureAwait(false),
             "briefing" => await BriefingAsync(paths, rest).ConfigureAwait(false),
@@ -675,6 +676,46 @@ internal static class Program
     }
 
     /// <summary>
+    /// Tells the agent what the deliverable still needs, after reading it.
+    /// </summary>
+    /// <remarks>
+    /// The supervisor's half of the bridge. Everything else this CLI does reports what an agent
+    /// did; this is the one command that sends a sentence the other way.
+    ///
+    /// It cannot stop the run, and there is deliberately no flag that would. A supervisor is not a
+    /// stop condition — the gate and the budgets are — and a second model with the power to end a
+    /// run is the self-judgement this tool exists to remove, wearing a reviewer's hat.
+    /// </remarks>
+    private static async Task<int> ReviewAsync(RolloutPaths paths, string[] args)
+    {
+        if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine(
+                "Usage: rollout review \"<what it still needs>\" [--missing \"a,b,c\"] " +
+                "[--blocking] [--from <id>]\n\n" +
+                "Read the deliverable first. The agent gets this on its next 'continue', once.");
+            return 1;
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["note"] = args[0],
+            ["from"] = Option(args, "--from") ?? "claude",
+            ["blocking"] = args.Contains("--blocking"),
+        };
+
+        if (Option(args, "--missing") is { Length: > 0 } missing)
+        {
+            payload["missing"] = missing.Split(
+                ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+
+        return await SendAsync(
+            paths,
+            client => client.PostAsync("/v1/missions/active/review", payload)).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Asks what has already been tried, filtered.
     /// </summary>
     /// <remarks>
@@ -914,6 +955,10 @@ internal static class Program
                                              What has already been tried. Filtered and paged —
                                              there is no way to fetch the lot, on purpose.
               rollout spend                    What this mission has cost so far, against its cap.
+              rollout review "<what it still needs>" [--missing "a,b,c"] [--blocking]
+                                             Read the deliverable, then say what is missing. The
+                                             agent gets it on its next 'continue', once. It never
+                                             stops the run — that is the gate's job, not yours.
               rollout wall                     What a Fourth Wall mission is withholding, and how
                                              much of it. Read this before mistaking absence for
                                              evidence.
