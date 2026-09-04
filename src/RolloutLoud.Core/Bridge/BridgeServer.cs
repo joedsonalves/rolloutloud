@@ -541,6 +541,23 @@ public sealed class BridgeServer : IAsyncDisposable
             }
             : MissionScope.Unrestricted;
 
+        // Checked before the mission exists, not when the launch is clicked. A path that is not
+        // there is a typo, and the moment to say so is while the operator is still looking at the
+        // command they typed — not an hour later when a button they forgot about fails.
+        var workingDirectory = body.WorkingDirectory is { Length: > 0 } raw
+            ? Path.GetFullPath(raw)
+            : null;
+
+        if (workingDirectory is not null && !Directory.Exists(workingDirectory))
+        {
+            await WriteAsync(context, HttpStatusCode.BadRequest, new ErrorResponse
+            {
+                Error = $"No such directory: {workingDirectory}",
+                Hint = "workingDirectory is where the agent will actually open. It has to exist first.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
         // ⚠️ Refused, not warned. Everywhere else a declared target with no recorded authorisation
         // is amber and the run opens anyway — the operator is watching the traffic and can catch
         // drift themselves. Behind the Fourth Wall nobody is watching the traffic, by design. The
@@ -577,6 +594,7 @@ public sealed class BridgeServer : IAsyncDisposable
             Scope = scope,
             FourthWall = body.FourthWall == true,
             Deliverable = body.Deliverable,
+            WorkingDirectory = workingDirectory,
             Stop = new StopConditions
             {
                 MaxAttempts = body.MaxAttempts is > 0 ? body.MaxAttempts.Value : 200,
@@ -621,6 +639,25 @@ public sealed class BridgeServer : IAsyncDisposable
             Logged?.Invoke($"⚠ Gate on {mission.Id}: {finding.Detail}");
         }
 
+        // A mission that works outside the anchor cannot start itself. Opening a CLI there means
+        // writing a mission block into another repository and starting a process in it, and the
+        // operator's click is what consents to both — so the mission is created and then waits,
+        // rather than being refused or quietly launching.
+        FluidButton? launch = null;
+
+        if (mission.WorksElsewhere(_host.Paths.RepositoryRoot) &&
+            _host.FindAgent(agentId) is { } descriptor)
+        {
+            launch = _host.RequestLaunch(
+                engine,
+                descriptor,
+                body.Elevated == true ? Agents.LaunchMode.Elevated : Agents.LaunchMode.Normal);
+
+            Logged?.Invoke(
+                $"Mission {mission.Id} works in {mission.WorkingDirectory}, outside the anchor. " +
+                "Click the button to open the agent there.");
+        }
+
         await WriteAsync(context, HttpStatusCode.Created, new
         {
             mission = engine.Mission,
@@ -639,6 +676,19 @@ public sealed class BridgeServer : IAsyncDisposable
                     fragment = f.Fragment,
                 }),
             },
+            launch = launch is null
+                ? null
+                : new
+                {
+                    buttonId = launch.Id,
+                    title = launch.Title,
+                    workingDirectory = mission.WorkingDirectory,
+                    next =
+                        "This mission works outside the anchor, so RolloutLoud will not open the " +
+                        "agent there on its own. The operator clicks that button; it writes the " +
+                        "mission block into that repository's instruction file and starts the CLI " +
+                        "in it. Do not wait on it if nobody is at the machine.",
+                },
             briefing = BriefingComposer.ForMainSession(engine.Mission, engine.Ledger, _host.HasAttachedIdentity),
         }).ConfigureAwait(false);
     }

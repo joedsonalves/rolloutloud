@@ -314,6 +314,10 @@ public sealed class MainViewModel : Observable
         });
         bridge.Logged += message => Dispatcher.UIThread.Post(() => Log(message));
 
+        // The host speaks too now — it writes into other repositories when a mission works outside
+        // the anchor, and that is not something to find out about by noticing a changed file.
+        host.Logged += message => Dispatcher.UIThread.Post(() => Log(message));
+
         // The agent is blocked on this, so it gets its own line rather than arriving only as a
         // card the operator may be scrolled away from.
         host.ProposalArrived += p => Dispatcher.UIThread.Post(() =>

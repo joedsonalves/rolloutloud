@@ -401,6 +401,16 @@ internal static class Program
             payload["deliverable"] = deliverable;
         }
 
+        if (Option(args, "--at") is { Length: > 0 } workdir)
+        {
+            payload["workingDirectory"] = workdir;
+        }
+
+        if (args.Contains("--elevated"))
+        {
+            payload["elevated"] = true;
+        }
+
         return await SendAsync(paths, client => client.PostAsync("/v1/missions", payload)).ConfigureAwait(false);
     }
 
@@ -871,6 +881,11 @@ internal static class Program
                                              [--offload always|threshold]
                                              [--max-attempts N] [--max-hours N] [--max-spend USD]
                                              [--fourth-wall] [--deliverable <path>]
+                                             [--at <folder>] [--elevated]
+                                             --at points the agent at another repository: the
+                                             mission block is written into ITS instruction file and
+                                             the CLI opens there. That leaves RolloutLoud's anchor,
+                                             so it produces a button and waits for the operator.
                                              --fourth-wall denies whoever supervises this run its
                                              raw material: no argv, no exit codes, no artifact
                                              folders, no button output. The deliverable is the one

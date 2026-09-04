@@ -63,6 +63,18 @@ public sealed record MissionRequest
 
     /// <summary>The one path behind that wall the supervisor is meant to read.</summary>
     public string? Deliverable { get; init; }
+
+    /// <summary>
+    /// Where the agent actually works, when that is not RolloutLoud's anchor.
+    /// </summary>
+    /// <remarks>
+    /// Naming one does not open anything: crossing out of the anchor writes into another repository
+    /// and starts a process there, so it produces a button and waits for the operator's click.
+    /// </remarks>
+    public string? WorkingDirectory { get; init; }
+
+    /// <summary>Open the agent with its approval prompts off, when the operator clicks.</summary>
+    public bool? Elevated { get; init; }
 }
 
 /// <summary>
@@ -106,6 +118,18 @@ public sealed record ProposalRequest
 
     /// <summary>The one path behind that wall the supervisor is meant to read.</summary>
     public string? Deliverable { get; init; }
+
+    /// <summary>
+    /// Where the agent actually works, when that is not RolloutLoud's anchor.
+    /// </summary>
+    /// <remarks>
+    /// Naming one does not open anything: crossing out of the anchor writes into another repository
+    /// and starts a process there, so it produces a button and waits for the operator's click.
+    /// </remarks>
+    public string? WorkingDirectory { get; init; }
+
+    /// <summary>Open the agent with its approval prompts off, when the operator clicks.</summary>
+    public bool? Elevated { get; init; }
 
     /// <summary>Why this gate and this scope. The field that makes the operator's review quick.</summary>
     public string? Rationale { get; init; }

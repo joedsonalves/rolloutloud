@@ -642,6 +642,30 @@ and it is the session whose context is most expensive to fill.
 reaches contexts and then persists in the ledger. Keeping the supervising session out of the raw
 traffic takes it out of the blast radius rather than fencing it and hoping.
 
+### The room on the other side: `--at`
+
+Redacting the bridge keeps raw material out of a supervisor's replies. Putting the worker **in
+another repository, in its own process**, means it was never in reach to begin with — the redaction
+is then the backstop, not the whole mechanism.
+
+```
+rollout mission "reach a critical and reproduce it in the report draft" \
+        --fourth-wall --deliverable "report/DRAFT.md" \
+        --at "C:\JOEDSON\PROGRAMACAO\PENTEST" --elevated
+```
+
+RolloutLoud writes the mission block into **that** repository's `CLAUDE.local.md` — that file only,
+rewritten, never its `CLAUDE.md` — and opens the CLI there. The briefing lists the repository's own
+top-level rules and note folders, read off the disk rather than assumed, and tells the agent to read
+them before its first attempt: nothing auto-loads a file called `LEIA-PRIMEIRO.md` the way
+`CLAUDE.md` is auto-loaded.
+
+⚠️ **This leaves the anchor, which is otherwise absolute** — every CLI and every fluid button opens
+where RolloutLoud was started. Writing into another repository and starting a process in it are not
+things a tool does because an agent asked, so **naming `--at` opens nothing**. It creates a button
+that says where it will write and what it will start, and waits for your click. No allowlist pattern
+reaches that button: the click *is* the consent.
+
 ### The wall has one window, and it is the deliverable
 
 `--deliverable report/DRAFT.md` names the one path behind the wall the supervisor is meant to read.
