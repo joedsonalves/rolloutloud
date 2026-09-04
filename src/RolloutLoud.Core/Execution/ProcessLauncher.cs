@@ -153,7 +153,16 @@ public static class ProcessLauncher
         return RunAsync(request, timeout, cancellationToken);
     }
 
-    private static ProcessStartInfo BuildTerminalStartInfo(LaunchRequest request)
+    /// <summary>
+    /// Internal so a test can read the command line without starting a window.
+    /// </summary>
+    /// <remarks>
+    /// The escaping bug this guards against could only ever be caught by inspecting the string:
+    /// the code compiled, the launch "succeeded" from RolloutLoud's point of view — cmd.exe started
+    /// fine — and the failure surfaced as a dialog from `start` naming the tail of the operator's
+    /// own path. Nothing on this side of the process boundary knew anything had gone wrong.
+    /// </remarks>
+    internal static ProcessStartInfo BuildTerminalStartInfo(LaunchRequest request)
     {
         if (!request.InTerminal)
         {
@@ -173,10 +182,24 @@ public static class ProcessLauncher
             // `start` gives the agent its own window; the quoted "RolloutLoud" is the title
             // argument, and leaving it out makes `start` swallow the first quoted token as the
             // title instead of running it — a silent no-op that looks like the button did nothing.
-            var info = new ProcessStartInfo { FileName = "cmd.exe" };
-            info.ArgumentList.Add("/c");
-            info.ArgumentList.Add(
-                "start \"RolloutLoud\" /D \"" + request.WorkingDirectory + "\" cmd /k " + commandLine);
+            //
+            // ⚠️ Arguments, NOT ArgumentList, and this one cost a real failed launch. ArgumentList
+            // escapes for the C runtime: an argument containing quotes comes out with every `"`
+            // rewritten as `\"`. cmd.exe has no backslash escape, so it sees a stray backslash
+            // glued to each quote — the working directory arrives as `\C:\...\ROLLOUTLOUD\`, start
+            // cannot find it, and the operator gets a dialog naming the tail of their own path.
+            //
+            // It only shows when the path contains a space, which is why it survived: the command
+            // line was verified as a STRING and never actually run from a folder like
+            // "MEU PROJETOS - PROGRAMAS". Setting Arguments passes the line through verbatim, which
+            // is what a shell that does its own quoting needs.
+            var info = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments =
+                    "/c start \"RolloutLoud\" /D \"" + request.WorkingDirectory + "\" cmd /k " + commandLine,
+            };
+
             return info;
         }
 
