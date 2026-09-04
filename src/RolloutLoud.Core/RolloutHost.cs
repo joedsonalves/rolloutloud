@@ -719,6 +719,77 @@ public sealed class RolloutHost
         }
     }
 
+    /// <summary>
+    /// Opens a session to supervise a run that nobody is watching.
+    /// </summary>
+    /// <remarks>
+    /// The supervisor opens in the <b>anchor</b>, not in the mission's working directory. It is not
+    /// there to work the objective — putting it in the same repository as the agent invites exactly
+    /// that, and two writers on one ledger is worse than none.
+    ///
+    /// Its authority is the operator's existing delegation and nothing more. With one, it answers;
+    /// without, it reads, reviews and drafts, and the question stays open. That is deliberately not
+    /// a second consent mechanism: the grant already says "a supervising session may act for me on
+    /// this mission", and inventing a separate switch for this would let the two drift apart until
+    /// nobody could say what they had agreed to.
+    /// </remarks>
+    public void WakeSupervisor(MissionEngine mission, string reason)
+    {
+        var agent = FindAgent(SupervisorAgentId) ?? Agents.FirstOrDefault();
+
+        if (agent is null)
+        {
+            Logged?.Invoke("Wanted to open a supervisor, but no agent is configured to open.");
+            return;
+        }
+
+        var mayAnswer = Deputies.For(mission.Mission.Id) is not null;
+        var briefing = Offload.BriefingComposer.ForSupervisor(mission.Mission, mayAnswer, reason);
+
+        WriteBriefingSection(Path.Combine(Paths.RepositoryRoot, agent.InstructionFile), briefing);
+
+        Logged?.Invoke(
+            $"↪ Opened a supervisor for {mission.Mission.Id} — {reason}. " +
+            (mayAnswer
+                ? "It may answer, under the delegation you granted for this mission."
+                : "It may only read and draft; you have not delegated answering here."));
+
+        LastSupervisorWake = DateTimeOffset.UtcNow;
+
+        ProcessLauncher.Launch(new LaunchRequest
+        {
+            Executable = agent.Executable,
+            Arguments = agent.ArgumentsFor(
+                LaunchMode.Normal,
+                $"You are supervising mission {mission.Mission.Id}. Read {agent.InstructionFile} and " +
+                "start now: check the open questions, read the deliverable, and say what is missing. " +
+                "Do not work the objective yourself."),
+            WorkingDirectory = Paths.RepositoryRoot,
+            InTerminal = true,
+            Environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ROLLOUTLOUD_BRIDGE"] = BridgeEndpoint ?? string.Empty,
+                ["ROLLOUTLOUD_TOKEN"] = BridgeToken ?? string.Empty,
+                ["ROLLOUTLOUD_HANDSHAKE"] = Paths.BridgeHandshakeFile,
+                ["ROLLOUTLOUD_MISSION"] = mission.Mission.Id,
+                ["ROLLOUTLOUD_ROLE"] = "supervisor",
+            },
+        });
+    }
+
+    /// <summary>
+    /// Which CLI supervises. The operator's own, because they are the one being stood in for.
+    /// </summary>
+    /// <remarks>
+    /// Not the mission's agent. Relaying a stuck run to a different model is a deliberate move on
+    /// the escalation ladder; picking a different model to <em>review</em> is a change of judge
+    /// nobody asked for.
+    /// </remarks>
+    public string SupervisorAgentId { get; set; } = AgentCatalog.Claude;
+
+    /// <summary>When a supervisor was last opened, for the floor between wake-ups.</summary>
+    public DateTimeOffset? LastSupervisorWake { get; private set; }
+
     /// <summary>Raised when an agent proposes a mission, so the window can come forward.</summary>
     public event Action<MissionProposal>? ProposalArrived;
 

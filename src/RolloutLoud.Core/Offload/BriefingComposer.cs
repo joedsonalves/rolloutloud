@@ -321,6 +321,101 @@ public static class BriefingComposer
     /// long-term notes usually live in one, and a vault is exactly the thing an agent should open
     /// before its first attempt rather than after its tenth.
     /// </remarks>
+    /// <summary>
+    /// The briefing for a session that will supervise a run rather than work it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Supervisors are replaceable, and <see cref="FourthWall"/> is why.</b> A supervisor behind
+    /// the wall was already forbidden from depending on anything but the ledger, the questions, the
+    /// reviews and the deliverable — and all four are on disk. So a fresh supervising session loses
+    /// nothing the wall let the previous one have. A mode built for injection and context cost turns
+    /// out to make continuity nearly free, which is the opposite of the worker's situation: an agent
+    /// handed over mid-run loses what it did not know it knew.
+    ///
+    /// The briefing is deliberately short. Everything a supervisor needs is a bridge call away, and
+    /// filling its window with a transcript would recreate the second-worker problem this whole mode
+    /// exists to prevent.
+    /// </remarks>
+    public static string ForSupervisor(Mission mission, bool mayAnswer, string reason)
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine("# You are supervising a run — RolloutLoud");
+        sb.AppendLine();
+        sb.AppendLine($"You were opened because: {reason}");
+        sb.AppendLine();
+
+        sb.AppendLine("## What is being worked on");
+        sb.AppendLine();
+        sb.AppendLine(mission.Objective);
+        sb.AppendLine();
+        sb.AppendLine($"Mission id: `{mission.Id}`, on `{mission.AgentId}`.");
+
+        if (!string.IsNullOrWhiteSpace(mission.Deliverable))
+        {
+            sb.AppendLine();
+            sb.AppendLine(
+                $"The deliverable is `{mission.Deliverable}`" +
+                (string.IsNullOrWhiteSpace(mission.WorkingDirectory)
+                    ? "."
+                    : $", in `{mission.WorkingDirectory}`.") +
+                " Read it. It is the thing the work is for, and the one place behind the wall you " +
+                "are meant to look in full.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## You are not the one working this");
+        sb.AppendLine();
+        sb.AppendLine(
+            "Do not run the objective yourself. An agent is on it, and a second one duplicating its " +
+            "attempts wastes the budget twice and puts two writers on one ledger.");
+        sb.AppendLine();
+        sb.AppendLine("Your job is four things:");
+        sb.AppendLine();
+        sb.AppendLine(
+            "- `rollout questions` — what it asked and nobody answered. " +
+            (mayAnswer
+                ? "Answer with `rollout answer <id> \"...\"`, and your answer does **not** have to be " +
+                  "one of the options it offered. Often it should not be: an answer confined to its " +
+                  "framing lets it frame the decision it is delegating."
+                : "**You may not answer.** The operator has not delegated that on this mission, so " +
+                  "write your reasoning into `rollout review` and leave the question open for them."));
+        sb.AppendLine(
+            "- `rollout ledger` — what has been ruled out. The argv and the artifact folders are " +
+            "withheld from you on purpose; that is the mode working, not something missing.");
+        sb.AppendLine(
+            "- the deliverable — read it and say what is missing with " +
+            "`rollout review \"...\" --missing \"a,b,c\"`. That reaches the agent on its next turn.");
+        sb.AppendLine(
+            "- `rollout spend` and `rollout continue` — whether the run is still worth what it costs.");
+        sb.AppendLine();
+
+        sb.AppendLine("## What you must not do");
+        sb.AppendLine();
+        sb.AppendLine(
+            "**You cannot end this run, and there is no call that would let you.** The gate and the " +
+            "stop conditions do that. A review marked blocking means *do this next*, never *stop* — " +
+            "a second model able to end a run is the self-judgement this tool exists to remove, " +
+            "wearing a reviewer's hat.");
+        sb.AppendLine();
+        sb.AppendLine(
+            "**Check what the agent tells you against the evidence that is not its output.** The " +
+            "repository's own files, prior findings, the numbers it cites — those you may read, and " +
+            "they are how you catch a claim that is confident and wrong. What you may not do is go " +
+            "around the wall into its run folders; if you ever do, say so plainly in a review.");
+        sb.AppendLine();
+
+        sb.AppendLine("## If it is going nowhere");
+        sb.AppendLine();
+        sb.AppendLine(
+            "Say so in a review, with the reason. Correcting an objective that was too ambitious for " +
+            "its budget is the supervisor's job, and saying it early is worth more than a tidy " +
+            "report at the end of a run that was never going to get there.");
+        sb.AppendLine();
+
+        return sb.ToString();
+    }
+
     private static IReadOnlyList<string> RulesIn(string directory)
     {
         try

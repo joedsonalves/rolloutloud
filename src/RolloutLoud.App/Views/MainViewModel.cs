@@ -250,6 +250,7 @@ public sealed class MainViewModel : Observable
     private readonly RolloutHost _host;
     private readonly BridgeServer _bridge;
     private readonly AgentSupervisor _supervisor;
+    private readonly SupervisorWatchdog _supervisorWatch;
 
     private string _objective = string.Empty;
     private string _gateCommand = string.Empty;
@@ -318,6 +319,12 @@ public sealed class MainViewModel : Observable
         // The host speaks too now — it writes into other repositories when a mission works outside
         // the anchor, and that is not something to find out about by noticing a changed file.
         host.Logged += message => Dispatcher.UIThread.Post(() => Log(message));
+
+        // Runs for the whole life of the window, and does nothing at all on a mission the operator
+        // has not delegated — which is every mission until they say otherwise. It needs no switch of
+        // its own for the same reason: the delegation IS the switch.
+        _supervisorWatch = new SupervisorWatchdog(host);
+        _supervisorWatch.Start();
 
         // The agent is blocked on this, so it gets its own line rather than arriving only as a
         // card the operator may be scrolled away from.
