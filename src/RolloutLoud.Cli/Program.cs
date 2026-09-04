@@ -37,6 +37,7 @@ internal static class Program
             "spend" => await SimpleGetAsync(paths, "/v1/missions/active/spend").ConfigureAwait(false),
             "wall" => await SimpleGetAsync(paths, "/v1/missions/active/wall").ConfigureAwait(false),
             "ask" => await AskAsync(paths, rest).ConfigureAwait(false),
+            "handover" => await HandoverAsync(paths, rest).ConfigureAwait(false),
             "questions" => await SimpleGetAsync(paths, "/v1/missions/active/questions").ConfigureAwait(false),
             "answer" => await AnswerAsync(paths, rest).ConfigureAwait(false),
             "review" => await ReviewAsync(paths, rest).ConfigureAwait(false),
@@ -681,6 +682,37 @@ internal static class Program
     }
 
     /// <summary>
+    /// Writes what this session came to believe, for the one that replaces it.
+    /// </summary>
+    /// <remarks>
+    /// Run before you are out, not after. That ordering is the whole design: a session at its
+    /// ceiling can still think about what mattered, and one that has hit its limit cannot — a
+    /// handover written by an exhausted session is the transcript it was supposed to replace.
+    /// </remarks>
+    private static async Task<int> HandoverAsync(RolloutPaths paths, string[] args)
+    {
+        if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine(
+                "Usage: rollout handover \"<what you came to believe>\" [--dropped \"<assumptions you " +
+                "stopped trusting>\"]\n" +
+                "                        [--next \"<most promising thing you had not got to>\"] " +
+                "[--role worker|supervisor]\n\n" +
+                "Not what you tried — the ledger has that. What it cannot carry.");
+            return 1;
+        }
+
+        return await SendAsync(paths, client => client.PostAsync("/v1/missions/active/handover", new
+        {
+            believes = args[0],
+            dropped = Option(args, "--dropped"),
+            next = Option(args, "--next"),
+            role = Option(args, "--role"),
+            from = Option(args, "--from"),
+        })).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Asks the supervisor something, and carries on.
     /// </summary>
     /// <remarks>
@@ -1057,6 +1089,11 @@ internal static class Program
               rollout scope "a.example.com,*.staging.example.com" --auth "<what permits it>"
                                              Bound the run once you know where the boundary is.
                                              Narrows only — it can never be widened.
+              rollout handover "<what you came to believe>" [--dropped "..."] [--next "..."]
+                                             [--role worker|supervisor]
+                                             Write what the ledger cannot carry, BEFORE you run
+                                             out. Your replacement reads it; a note written by
+                                             an exhausted session is the transcript it replaces.
               rollout ask "<question>" [--options "a,b,c"] [--if-unanswered "..."]
                                              Ask the supervisor something you cannot settle.
                                              NOTHING WAITS ON IT — carry on, the answer reaches

@@ -176,6 +176,29 @@ public sealed record ScopeRequest
     public string? Authorization { get; init; }
 }
 
+/// <summary>What a session hands to the one that replaces it.</summary>
+/// <remarks>
+/// Not what it tried — the ledger has that. What it came to believe, and which of its own
+/// assumptions it stopped trusting: the two things a ledger cannot carry, and the two a fresh
+/// session would ask for first.
+/// </remarks>
+public sealed record HandoverRequest
+{
+    public string? From { get; init; }
+
+    /// <summary>worker | supervisor. Defaults to worker.</summary>
+    public string? Role { get; init; }
+
+    public required string Believes { get; init; }
+
+    public string? Dropped { get; init; }
+
+    public string? Next { get; init; }
+
+    /// <summary>Window size when it wrote this, so its replacement sees the cost it escaped.</summary>
+    public int? WindowTokens { get; init; }
+}
+
 /// <summary>The agent asking the supervisor something, without stopping to wait.</summary>
 public sealed record QuestionRequest
 {
