@@ -6,6 +6,13 @@
     <RootNamespace>RolloutLoud.Core</RootNamespace>
   </PropertyGroup>
 
+  <!-- One seam, for the launcher's command line. A quoting bug there cannot be caught from
+       outside the process: cmd.exe starts fine and the failure appears as a dialog from `start`.
+       The only way to test it is to read the string before it is handed to Windows. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="RolloutLoud.Core.Tests" />
+  </ItemGroup>
+
   <!-- WithCulture="false" and an explicit LogicalName are both load-bearing.
 
        `Strings.en.json` matches MSBuild's name.culture.extension pattern (`en` is a real culture),

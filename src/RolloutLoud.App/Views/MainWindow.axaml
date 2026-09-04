@@ -333,6 +333,21 @@
             </StackPanel>
           </Border>
 
+          <!-- Delegation. This checkbox IS the consent, and it lives here and nowhere else: there
+               is no bridge route that grants one, because a session that could grant itself is not
+               delegated, and every audit line afterwards would claim a decision nobody made. -->
+          <Border Classes="card">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{loc:Tr Key=deputy.title}" FontWeight="SemiBold" FontSize="13" />
+              <TextBlock Text="{loc:Tr Key=deputy.hint}" Classes="hint" />
+
+              <CheckBox IsChecked="{Binding Delegated}" Content="{loc:Tr Key=deputy.enable}" />
+
+              <TextBlock Text="{Binding DelegationSummary}" Classes="hint" />
+              <TextBlock Text="{loc:Tr Key=deputy.caveat}" Classes="hint" />
+            </StackPanel>
+          </Border>
+
           <WrapPanel Margin="0,4,0,10">
             <Button Content="{loc:Tr Key=action.start}" Command="{Binding StartMission}" Padding="18,10" FontWeight="SemiBold" Margin="0,0,8,8" />
             <Button Content="{Binding PauseLabel}" Command="{Binding PauseMission}" Padding="14,10" Margin="0,0,8,8" />
