@@ -109,6 +109,75 @@ public class LaunchCommandLineTests
     }
 
     [Fact]
+    public void A_launched_mission_carries_an_opening_line_so_the_session_starts()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        // ⚠️ A briefing is not a start. Writing the mission into the instruction file gets it
+        // loaded and obeyed — and an interactive CLI still opens at a prompt and sits there. This
+        // cost a real run: the agent was launched into the target repository, the mission block was
+        // written, the process was alive, the ledger stayed empty, and the operator was watching a
+        // window where nothing happened. There is no error anywhere to explain that.
+        var agent = RolloutLoud.Core.Agents.AgentCatalog.Defaults[0];
+
+        var info = ProcessLauncher.BuildTerminalStartInfo(new LaunchRequest
+        {
+            Executable = agent.Executable,
+            Arguments = agent.ArgumentsFor(
+                RolloutLoud.Core.Agents.LaunchMode.Elevated,
+                "Start the mission in CLAUDE.local.md now. Mission id: m-1."),
+            WorkingDirectory = Spaced,
+            InTerminal = true,
+        });
+
+        Assert.Contains("Start the mission in CLAUDE.local.md now", info.Arguments, StringComparison.Ordinal);
+        Assert.Contains("--dangerously-skip-permissions", info.Arguments, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_launch_with_no_mission_says_nothing()
+    {
+        // A launch button with no mission is the operator opening a terminal. Putting words in it
+        // would be presumptuous, and they would arrive as a message nobody meant to send.
+        var agent = RolloutLoud.Core.Agents.AgentCatalog.Defaults[0];
+
+        Assert.Equal(
+            agent.ArgumentsFor(RolloutLoud.Core.Agents.LaunchMode.Normal),
+            agent.ArgumentsFor(RolloutLoud.Core.Agents.LaunchMode.Normal, null));
+
+        Assert.Equal(
+            agent.ArgumentsFor(RolloutLoud.Core.Agents.LaunchMode.Normal),
+            agent.ArgumentsFor(RolloutLoud.Core.Agents.LaunchMode.Normal, "   "));
+    }
+
+    [Fact]
+    public void The_opening_line_is_one_argument_even_though_it_has_spaces()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        // It is a sentence, so it must arrive quoted or the CLI reads its first word as the prompt
+        // and the rest as flags it does not know — which fails loudly for some and silently for
+        // others.
+        var agent = RolloutLoud.Core.Agents.AgentCatalog.Defaults[0];
+
+        var info = ProcessLauncher.BuildTerminalStartInfo(new LaunchRequest
+        {
+            Executable = agent.Executable,
+            Arguments = agent.ArgumentsFor(RolloutLoud.Core.Agents.LaunchMode.Normal, "two words"),
+            WorkingDirectory = Spaced,
+            InTerminal = true,
+        });
+
+        Assert.Contains("\"two words\"", info.Arguments, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_captured_run_still_uses_the_argument_list()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))

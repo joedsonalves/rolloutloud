@@ -196,6 +196,24 @@ public static class BriefingComposer
             "try is not a repeat.");
         sb.AppendLine();
 
+        // Above the identity section because it is the one that changes behaviour at a fork, and a
+        // fork is where a run either keeps going or quietly ends.
+        sb.AppendLine("## If you hit something you cannot settle alone");
+        sb.AppendLine();
+        sb.AppendLine(
+            "Ask: `POST /v1/missions/active/question` with the question, the choices as you see " +
+            "them, and — required thinking, if not required text — what you will do if nobody " +
+            "replies. The answer reaches you on a later `/continue`.");
+        sb.AppendLine();
+        sb.AppendLine(
+            "⚠️ **Asking is not stopping, and printing a menu is.** A prompt that waits for a human " +
+            "hands the decision to somebody who may be asleep, and it looks exactly the same " +
+            "whether your reason was good or bad — which is the move this whole tool exists to " +
+            "remove. Ask, then carry on with whatever does not depend on the answer. If nothing " +
+            "does, take your own best call, say in your next observation that you took it " +
+            "unanswered, and keep moving.");
+        sb.AppendLine();
+
         sb.AppendLine("## If you need an identity");
         sb.AppendLine();
         sb.AppendLine(identityAttached

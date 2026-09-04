@@ -113,6 +113,117 @@ public sealed class MissionEngine
     }
 
     /// <summary>
+    /// Bounds the run to targets that were not known when it opened.
+    /// </summary>
+    /// <remarks>
+    /// A gap this product had until a real run walked into it. The scope was create-time only —
+    /// fine when the operator knows the boundary in advance, useless when <em>finding</em> the
+    /// boundary is part of the job. A run whose first task is "pick a programme and work inside its
+    /// published scope" cannot name its targets on the command line that starts it, so it started
+    /// with no boundary at all: the one guard that matters most on that kind of work, off.
+    ///
+    /// It can only ever narrow. See <see cref="MissionScope.Narrow"/> for why that is the whole
+    /// feature rather than a detail — and note that this is the agent bounding itself, which stops
+    /// drift and stops nothing else. It is a guard rail like every other scope call, and the value
+    /// is that attempt forty is measured against what attempt one wrote down.
+    /// </remarks>
+    public ScopeNarrowing DeclareScope(
+        IReadOnlyList<string> targets,
+        IReadOnlyList<string> exclusions,
+        string? authorization)
+    {
+        lock (_gate)
+        {
+            var narrowing = Mission.Scope.Narrow(targets, exclusions, authorization);
+
+            if (!narrowing.Allowed)
+            {
+                Log("scope-refused", narrowing.Reason);
+                return narrowing;
+            }
+
+            Mission = Mission with { Scope = narrowing.Scope! };
+            Log("scope-declared", narrowing.Reason + " Authorised by: " + narrowing.Scope!.Authorization);
+            Persist();
+            return narrowing;
+        }
+    }
+
+    /// <summary>
+    /// Records a question the agent could not settle alone. Never changes the run's state.
+    /// </summary>
+    /// <remarks>
+    /// Asking is not stopping, and that separation is the entire value: an agent that blocks on a
+    /// question has handed the decision to somebody who may be asleep, which is the move this
+    /// product exists to remove.
+    /// </remarks>
+    public AgentQuestion Ask(AgentQuestion question)
+    {
+        lock (_gate)
+        {
+            Mission = Mission with { Questions = [.. Mission.Questions, question] };
+        }
+
+        Log("question", $"{question.From}: {question.Question}");
+        Persist();
+        return question;
+    }
+
+    /// <summary>The supervisor answering. Returns null when there is no such open question.</summary>
+    public AgentQuestion? Answer(string questionId, string answer, string? from)
+    {
+        lock (_gate)
+        {
+            var open = Mission.Questions.FirstOrDefault(q => q.Id == questionId && q.IsOpen);
+
+            if (open is null)
+            {
+                return null;
+            }
+
+            var answered = open with
+            {
+                Answer = answer,
+                AnsweredBy = from ?? "the supervisor",
+                AnsweredAt = DateTimeOffset.UtcNow,
+            };
+
+            Mission = Mission with
+            {
+                Questions = [.. Mission.Questions.Select(q => q.Id == questionId ? answered : q)],
+            };
+
+            Log("answer", $"{answered.AnsweredBy}: {answer}");
+            Persist();
+            return answered;
+        }
+    }
+
+    /// <summary>Hands over answers the agent has not collected, and marks them delivered.</summary>
+    public IReadOnlyList<AgentQuestion> CollectAnswers()
+    {
+        lock (_gate)
+        {
+            var pending = Mission.Questions.Where(q => q.IsUndelivered).ToList();
+
+            if (pending.Count == 0)
+            {
+                return [];
+            }
+
+            var now = DateTimeOffset.UtcNow;
+
+            Mission = Mission with
+            {
+                Questions = [.. Mission.Questions.Select(q => q.IsUndelivered ? q with { DeliveredAt = now } : q)],
+            };
+
+            Persist();
+            return pending;
+        }
+    }
+
+    /// <summary>
     /// Records what the supervisor asked for after reading the deliverable.
     /// </summary>
     /// <remarks>

@@ -60,6 +60,30 @@ public sealed record AgentDescriptor
     public IReadOnlyList<string> ArgumentsFor(LaunchMode mode) =>
         mode == LaunchMode.Elevated ? ElevatedArguments : NormalArguments;
 
+    /// <summary>
+    /// The launch arguments plus an opening line, so the session starts working instead of waiting.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>A briefing is not a start.</b> Writing the mission into the instruction file gets it
+    /// loaded and gets it obeyed — but an interactive CLI opens at a prompt and sits there. Launch
+    /// a mission and walk away, and you come back to an agent that has read everything, understood
+    /// everything, and done nothing, with no error anywhere to explain it.
+    ///
+    /// This cost a real run: the agent was launched into the target repository, the mission block
+    /// was written, the process was alive, the ledger stayed empty, and the operator was looking at
+    /// a window where nothing happened.
+    ///
+    /// The opening line goes as a bare positional argument, which every one of these CLIs treats as
+    /// "start interactively, with this as the first message". Deliberately <b>not</b>
+    /// <see cref="PromptArguments"/>: those carry the one-shot print flags used for headless
+    /// subagent rounds, and using them here would close the window as soon as the answer was
+    /// printed — turning the operator's session into a batch job they cannot talk to.
+    /// </remarks>
+    public IReadOnlyList<string> ArgumentsFor(LaunchMode mode, string? opening) =>
+        string.IsNullOrWhiteSpace(opening)
+            ? ArgumentsFor(mode)
+            : [.. ArgumentsFor(mode), opening];
+
     /// <summary>Human-readable command line, for the button tooltip and the ledger.</summary>
     public string CommandLineFor(LaunchMode mode)
     {

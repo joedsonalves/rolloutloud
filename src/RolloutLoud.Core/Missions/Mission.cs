@@ -105,6 +105,9 @@ public sealed record Mission
     /// </remarks>
     public IReadOnlyList<SupervisorNote> Reviews { get; init; } = [];
 
+    /// <summary>What the agent asked the supervisor, and what came back. Oldest first.</summary>
+    public IReadOnlyList<AgentQuestion> Questions { get; init; } = [];
+
     /// <summary>Whether the agent will work somewhere other than RolloutLoud's own anchor.</summary>
     public bool WorksElsewhere(string anchor) =>
         !string.IsNullOrWhiteSpace(WorkingDirectory) &&
