@@ -1,5 +1,6 @@
 using RolloutLoud.Core.Agents;
 using RolloutLoud.Core.Buttons;
+using RolloutLoud.Core.Consent;
 using RolloutLoud.Core.Context;
 using RolloutLoud.Core.Elevation;
 using RolloutLoud.Core.Execution;
@@ -32,6 +33,8 @@ public sealed class RolloutHost
     private DateTime _agentsStamp = DateTime.MinValue;
     private TokenPrices _prices = TokenPrices.Default;
     private DateTime _pricesStamp = DateTime.MinValue;
+    private DeputyRegister _deputies = DeputyRegister.Empty;
+    private DateTime _deputyStamp = DateTime.MinValue;
 
     public RolloutHost(RolloutPaths paths, IElevationService elevation)
     {
@@ -101,6 +104,69 @@ public sealed class RolloutHost
 
     /// <summary>How much each Fourth Wall mission has kept from whoever is steering it.</summary>
     public FourthWallAudit Wall { get; } = new();
+
+    /// <summary>
+    /// What the operator has delegated to a supervising session, re-read whenever the file changes.
+    /// </summary>
+    /// <remarks>
+    /// Live for the reason the allowlist is live, and more so: this is the one the operator will
+    /// want to <em>withdraw</em> mid-run. Deleting the file has to stop the delegation on the next
+    /// click, not after a restart.
+    /// </remarks>
+    public DeputyRegister Deputies
+    {
+        get
+        {
+            var stamp = File.Exists(Paths.DeputyFile)
+                ? File.GetLastWriteTimeUtc(Paths.DeputyFile)
+                : DateTime.MinValue;
+
+            lock (_gate)
+            {
+                if (stamp != _deputyStamp)
+                {
+                    _deputies = DeputyRegister.Load(Paths.DeputyFile);
+                    _deputyStamp = stamp;
+                }
+
+                return _deputies;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The operator delegating, or withdrawing. Called from the window only.
+    /// </summary>
+    /// <remarks>
+    /// There is deliberately no bridge route reaching this. A supervising session that could grant
+    /// itself is not delegated, it is helping itself — and every audit line downstream would be
+    /// claiming a consent nobody gave.
+    /// </remarks>
+    public void Delegate(DeputyGrant? grant, string missionId)
+    {
+        var kept = Deputies.All.Where(g => !g.Covers(missionId)).ToList();
+
+        if (grant is not null)
+        {
+            kept.Add(grant);
+        }
+
+        // Grants for missions that are no longer open go with it. A delegation for a run that ended
+        // weeks ago is a permission that stopped being a decision.
+        var open = Missions.Select(m => m.Mission.Id).ToHashSet(StringComparer.Ordinal);
+
+        DeputyRegister.Write(Paths.DeputyFile, kept.Where(g => open.Contains(g.MissionId)));
+
+        Logged?.Invoke(grant is null
+            ? $"Delegation withdrawn for {missionId}. Buttons on it need your click again."
+            : $"Delegated on {missionId} to {grant.Deputy}: " +
+              (grant.MayLaunchOutsideAnchor ? "may open agents outside the anchor" : "no launches") +
+              ", " +
+              (grant.MayClickUnlistedButtons ? "may click buttons the allowlist does not cover" : "allowlist still applies") +
+              ". Delete .rolloutloud/deputy.json to withdraw.");
+
+        StateChanged?.Invoke();
+    }
 
     /// <summary>The current price list, re-read whenever pricing.json changes.</summary>
     /// <remarks>
@@ -734,6 +800,10 @@ public sealed class RolloutHost
         // reentrancy is the kind of thing that stops working when someone splits the lock later.
         var allowlist = Allowlist;
 
+        // Read outside the lock for the same reason the allowlist is, and re-read on every
+        // invocation so that deleting deputy.json withdraws the delegation on the very next click.
+        var grantFor = FindGrant(buttonId);
+
         FluidButton button;
         lock (_gate)
         {
@@ -745,11 +815,30 @@ public sealed class RolloutHost
             // Checked against the allowlist as it stands NOW, not as it stood when the button was
             // created. A pattern the operator added a minute ago has to apply to the request that
             // prompted them to add it, and one they removed has to stop applying immediately.
-            if (!byOperator && !allowlist.Allows(found.Command))
+            if (!byOperator &&
+                !allowlist.Allows(found.Command) &&
+                grantFor is not { MayClickUnlistedButtons: true } &&
+                !found.Command.StartsWith(LaunchButtonPrefix, StringComparison.Ordinal))
             {
                 throw new UnauthorizedAccessException(
-                    "This command is not on the allowlist, so only the operator can run it. " +
-                    "Add a pattern to .rolloutloud/allowlist.json if it should be automatic.");
+                    "This command is not on the allowlist, so only the operator can run it — or a " +
+                    "session they have delegated to for this mission. Add a pattern to " +
+                    ".rolloutloud/allowlist.json, or ask them to delegate in the window.");
+            }
+
+            // ⚠️ Every refusal happens BEFORE this transition, and that ordering is load-bearing.
+            // A guard that throws after the button is marked Running leaves it Running for ever —
+            // and the "already running, do nothing" check above then swallows every later attempt,
+            // INCLUDING the operator's own click. One refused agent request would permanently brick
+            // the button, and the symptom is a button that does nothing when clicked, which reads
+            // as a dead UI rather than as a refusal that happened an hour ago.
+            if (!byOperator && found.Command.StartsWith(LaunchButtonPrefix, StringComparison.Ordinal) &&
+                grantFor is not { MayLaunchOutsideAnchor: true })
+            {
+                throw new UnauthorizedAccessException(
+                    "Opening an agent outside the anchor is the operator's click. No allowlist " +
+                    "pattern reaches this — but they can delegate it for this mission in the " +
+                    "window, and then you may click it yourself.");
             }
 
             if (found.Status == ButtonStatus.Running)
@@ -759,6 +848,17 @@ public sealed class RolloutHost
 
             button = found with { Status = ButtonStatus.Running, InvokedAt = DateTimeOffset.UtcNow };
             _buttons[buttonId] = button;
+        }
+
+        // Said out loud, and never as if the operator had clicked. A delegated click is a real
+        // decision they made once, in advance — and the record has to show which of the two it was,
+        // or the log stops being able to answer "who did this?" months later.
+        if (!byOperator && grantFor is not null && !allowlist.Allows(button.Command))
+        {
+            Logged?.Invoke(
+                $"↪ {grantFor.Deputy} clicked \"{button.Title}\" under the delegation you granted " +
+                $"for this mission at {grantFor.GrantedAt.ToLocalTime():HH:mm}" +
+                (string.IsNullOrWhiteSpace(grantFor.Note) ? "." : $" — {grantFor.Note}"));
         }
 
         StateChanged?.Invoke();
@@ -784,12 +884,17 @@ public sealed class RolloutHost
         // add to make this automatic.
         if (button.Command.StartsWith(LaunchButtonPrefix, StringComparison.Ordinal))
         {
-            if (!byOperator)
+            // Still unreachable by any allowlist pattern — nothing an operator writes in
+            // allowlist.json makes leaving the anchor automatic. What can reach it is a delegation
+            // they gave, for THIS mission, naming this capability. That is the same consent stated
+            // once in advance instead of once per click, which is the only version of "you may act
+            // as me" that is not just the rule being ignored.
+            if (!byOperator && grantFor is not { MayLaunchOutsideAnchor: true })
             {
                 throw new UnauthorizedAccessException(
-                    "Opening an agent outside the anchor is the operator's click, always. No " +
-                    "allowlist pattern reaches this — the click is what consents to writing into " +
-                    "another repository.");
+                    "Opening an agent outside the anchor is the operator's click. No allowlist " +
+                    "pattern reaches this — but they can delegate it for this mission in the " +
+                    "window, and then you may click it yourself.");
             }
 
             var parts = button.Command[LaunchButtonPrefix.Length..].Split(':');
@@ -880,6 +985,23 @@ public sealed class RolloutHost
     /// thing that finished — and, worse, leaves it open across a restart, so a launch that already
     /// happened comes back asking to happen again.
     /// </remarks>
+    /// <summary>The delegation covering a button's mission, if the operator gave one.</summary>
+    /// <remarks>
+    /// Keyed on the button's mission, so a delegation given for one run never covers a button
+    /// belonging to another. That is the boundary that actually holds — the deputy name is a label
+    /// for the audit line, since one token authenticates every caller on this bridge.
+    /// </remarks>
+    private DeputyGrant? FindGrant(string buttonId)
+    {
+        string? missionId;
+        lock (_gate)
+        {
+            missionId = _buttons.GetValueOrDefault(buttonId)?.MissionId;
+        }
+
+        return Deputies.For(missionId);
+    }
+
     private FluidButton Settle(FluidButton button, ButtonStatus status, string detail)
     {
         var settled = button with { Status = status, OutputExcerpt = detail };

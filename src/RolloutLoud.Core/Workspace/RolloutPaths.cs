@@ -39,6 +39,16 @@ public sealed class RolloutPaths
     /// </remarks>
     public string PricingFile => Path.Combine(StateRoot, "pricing.json");
 
+    /// <summary>
+    /// What the operator has delegated to a supervising session, per mission.
+    /// </summary>
+    /// <remarks>
+    /// Written by the window only — never by the bridge. A session that could grant itself is not
+    /// delegated, and the audit line saying it was would be a fiction. Deleting this file withdraws
+    /// every delegation immediately.
+    /// </remarks>
+    public string DeputyFile => Path.Combine(StateRoot, "deputy.json");
+
     /// <summary>Details the operator has lent to agents. Absent by default, and absence means no.</summary>
     public string IdentityFile => Path.Combine(StateRoot, "identity.json");
 

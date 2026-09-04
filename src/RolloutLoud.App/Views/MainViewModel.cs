@@ -6,6 +6,7 @@ using RolloutLoud.Core;
 using RolloutLoud.Core.Agents;
 using RolloutLoud.Core.Bridge;
 using RolloutLoud.Core.Buttons;
+using RolloutLoud.Core.Consent;
 using RolloutLoud.Core.Localization;
 using RolloutLoud.Core.Missions;
 using RolloutLoud.Core.Money;
@@ -795,6 +796,8 @@ public sealed class MainViewModel : Observable
         {
             Set(ref _fourthWall, value);
             Raise(nameof(WallSummary));
+        Raise(nameof(Delegated));
+        Raise(nameof(DelegationSummary));
         }
     }
 
@@ -823,6 +826,60 @@ public sealed class MainViewModel : Observable
             }
 
             return Localizer.Current.Format("wall.on", _host.Wall.For(_mission.Mission.Id));
+        }
+    }
+
+    /// <summary>
+    /// Whether a supervising session may click for the operator on the mission they are watching.
+    /// </summary>
+    /// <remarks>
+    /// This checkbox is the consent. It is here and nowhere else on purpose — there is no bridge
+    /// route that grants a delegation, because a session that could grant itself is not delegated,
+    /// it is helping itself, and every audit line afterwards would claim a decision nobody made.
+    ///
+    /// Unchecking withdraws immediately: the register is re-read from disk on every click, so the
+    /// very next one goes back to needing the operator.
+    /// </remarks>
+    public bool Delegated
+    {
+        get => _mission is not null && _host.Deputies.For(_mission.Mission.Id) is not null;
+        set
+        {
+            if (_mission is null)
+            {
+                return;
+            }
+
+            _host.Delegate(
+                value
+                    ? new DeputyGrant
+                    {
+                        MissionId = _mission.Mission.Id,
+                        Deputy = _mission.Mission.AgentId,
+                        MayLaunchOutsideAnchor = true,
+                        MayClickUnlistedButtons = true,
+                        Note = "granted from the window",
+                    }
+                    : null,
+                _mission.Mission.Id);
+
+            Raise(nameof(Delegated));
+            Raise(nameof(DelegationSummary));
+        }
+    }
+
+    public string DelegationSummary
+    {
+        get
+        {
+            if (_mission is null)
+            {
+                return Localizer.Current["deputy.none"];
+            }
+
+            return _host.Deputies.For(_mission.Mission.Id) is { } grant
+                ? Localizer.Current.Format("deputy.on", grant.Deputy, grant.GrantedAt.ToLocalTime())
+                : Localizer.Current["deputy.off"];
         }
     }
 
