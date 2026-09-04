@@ -61,6 +61,20 @@ public sealed class RolloutPaths
     /// </remarks>
     public string DeputyFile => Path.Combine(StateRoot, "deputy.json");
 
+    /// <summary>
+    /// What each session handed over to the next, per mission.
+    /// </summary>
+    /// <remarks>
+    /// Under the anchor's state folder rather than in the Obsidian vault, and that separation is the
+    /// point: the vault is the operator's long memory of the product and is read by whoever works in
+    /// the repository. A supervisor's running notes have a different reader — the next supervisor —
+    /// and a worker reading its own supervisor's assessment of it changes what the worker does.
+    /// </remarks>
+    public string SessionBrainDirectory => Path.Combine(StateRoot, "sessions");
+
+    /// <summary>Which transcript belongs to which session RolloutLoud started.</summary>
+    public string SessionTrailFile => Path.Combine(StateRoot, "sessions.json");
+
     /// <summary>Details the operator has lent to agents. Absent by default, and absence means no.</summary>
     public string IdentityFile => Path.Combine(StateRoot, "identity.json");
 

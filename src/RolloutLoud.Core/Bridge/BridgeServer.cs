@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using RolloutLoud.Core.Buttons;
 using RolloutLoud.Core.Missions;
 using RolloutLoud.Core.Offload;
+using RolloutLoud.Core.Watchdog;
 
 namespace RolloutLoud.Core.Bridge;
 
@@ -395,6 +396,10 @@ public sealed class BridgeServer : IAsyncDisposable
 
                 case ("question", "POST"):
                     await AskAsync(context, engine).ConfigureAwait(false);
+                    return;
+
+                case ("handover", "POST"):
+                    await HandoverAsync(context, engine).ConfigureAwait(false);
                     return;
 
                 case ("questions", "GET"):
@@ -896,6 +901,11 @@ public sealed class BridgeServer : IAsyncDisposable
         var reviews = engine.CollectReviews();
         var answers = engine.CollectAnswers();
 
+        // Asked for on the call the agent already makes, and asked for BEFORE it runs out rather
+        // than after. A session at the ceiling can still think; one that has hit its limit cannot,
+        // and a handover written by an exhausted session is the transcript it was meant to replace.
+        var handover = _host.ShouldHandOver(engine.Mission, RolloutHost.WorkerRole);
+
         await WriteAsync(context, HttpStatusCode.OK, new
         {
             @continue = decision.Continue,
@@ -903,7 +913,10 @@ public sealed class BridgeServer : IAsyncDisposable
                 Environment.NewLine + Environment.NewLine,
                 new[] { decision.Reason }
                     .Concat(answers.Select(a => a.ForAgent()))
-                    .Concat(reviews.Select(r => r.ForAgent()))),
+                    .Concat(reviews.Select(r => r.ForAgent()))
+                    .Concat(handover.HandOver
+                        ? [$"⚠️ {handover.Detail}.{Environment.NewLine}{Environment.NewLine}{HandoverWatch.HandoverPrompt}"]
+                        : Array.Empty<string>())),
             state = engine.Mission.State.ToString(),
             tier = engine.Mission.EscalationTier,
             attempts = engine.Ledger.Count,
@@ -1036,6 +1049,62 @@ public sealed class BridgeServer : IAsyncDisposable
                 "Every command you declare from here has to name one of these, or the bridge " +
                 "refuses it and the refusal goes into your ledger. You can narrow this again; you " +
                 "cannot widen it.",
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A session writing what it came to believe, before a fresh one takes over.
+    /// </summary>
+    /// <remarks>
+    /// Collected <b>while the session is still healthy</b>, which is the whole reason the ceiling
+    /// fires before the limit rather than after. An agent that has run out has nothing left to think
+    /// with; one at the ceiling can still say what it believes and what it stopped trusting — and
+    /// those are the two things a ledger cannot carry.
+    ///
+    /// It goes into the session brain, not the ledger. The ledger is what was tried; this is what
+    /// somebody concluded, and mixing them would make "what has been ruled out" answer with opinion.
+    /// </remarks>
+    private async Task HandoverAsync(HttpListenerContext context, MissionEngine engine)
+    {
+        var body = await ReadAsync<HandoverRequest>(context).ConfigureAwait(false);
+
+        if (body is null || string.IsNullOrWhiteSpace(body.Believes))
+        {
+            await WriteAsync(context, HttpStatusCode.BadRequest, new ErrorResponse
+            {
+                Error = "'believes' is required.",
+                Hint =
+                    "Say what you came to BELIEVE, not what you tried — the ledger already has that. " +
+                    "Add 'dropped' for the assumptions you stopped trusting, which is the half that " +
+                    "saves the next session a day.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        var role = string.Equals(body.Role, RolloutHost.SupervisorRole, StringComparison.OrdinalIgnoreCase)
+            ? RolloutHost.SupervisorRole
+            : RolloutHost.WorkerRole;
+
+        _host.Brain.Record(engine.Mission.Id, new Handover
+        {
+            Role = role,
+            From = body.From ?? engine.Mission.AgentId,
+            Believes = body.Believes.Trim(),
+            Dropped = body.Dropped,
+            Next = body.Next,
+            WindowTokens = body.WindowTokens,
+        });
+
+        Logged?.Invoke($"🪃 {role} handover recorded on {engine.Mission.Id}: {body.Believes}");
+
+        await WriteAsync(context, HttpStatusCode.Created, new
+        {
+            recorded = true,
+            role,
+            next =
+                "Kept where a power cut cannot reach it. Carry on — you are not finished, and this " +
+                "is what your replacement reads when RolloutLoud decides a fresh session is cheaper " +
+                "than yours.",
         }).ConfigureAwait(false);
     }
 

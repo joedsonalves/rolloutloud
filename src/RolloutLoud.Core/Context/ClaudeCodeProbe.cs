@@ -93,6 +93,9 @@ public sealed class ClaudeCodeProbe : IContextProbe
     /// literally would report a window of nothing for a session that had just used a million
     /// tokens — which is the reading that matters most and the one it would get wrong.
     /// </remarks>
+    /// <summary>The window as of the most recent charged turn in one named transcript.</summary>
+    internal static int? WindowIn(string transcript) => LastWindowSize(transcript);
+
     private static int? LastWindowSize(string transcript)
     {
         try

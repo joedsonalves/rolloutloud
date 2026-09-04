@@ -6,6 +6,7 @@ using RolloutLoud.Core.Elevation;
 using RolloutLoud.Core.Execution;
 using RolloutLoud.Core.Missions;
 using RolloutLoud.Core.Money;
+using RolloutLoud.Core.Watchdog;
 using RolloutLoud.Core.Workspace;
 
 namespace RolloutLoud.Core;
@@ -47,6 +48,8 @@ public sealed class RolloutHost
         Housekeeping = new Housekeeper(paths);
         Context = new ContextMeter();
         Spend = new SpendMeter(() => Prices);
+        Brain = new SessionBrain(paths.SessionBrainDirectory);
+        Trail = new SessionTrail(paths.SessionTrailFile);
 
         foreach (var button in Buttons_.Load())
         {
@@ -137,6 +140,47 @@ public sealed class RolloutHost
 
     /// <summary>How much each Fourth Wall mission has kept from whoever is steering it.</summary>
     public FourthWallAudit Wall { get; } = new();
+
+    /// <summary>What each session handed over to the next. Survives a power cut.</summary>
+    public SessionBrain Brain { get; }
+
+    /// <summary>Which transcript belongs to which session, so a per-role ceiling reads its own.</summary>
+    public SessionTrail Trail { get; }
+
+    /// <summary>When to replace a session with a fresh one. See <see cref="HandoverWatch"/>.</summary>
+    public HandoverSettings Handover { get; set; } = new();
+
+    /// <summary>
+    /// Whether a session should hand over now, and why.
+    /// </summary>
+    /// <remarks>
+    /// The window is read from the role's own transcript where one has been attributed, and from the
+    /// whole folder where none has. Two sessions in one repository share that folder, so without
+    /// attribution a per-role ceiling fires on the pair's tokens rather than the role's — which on a
+    /// run that improves this tool is every run.
+    /// </remarks>
+    public HandoverDecision ShouldHandOver(Mission mission, string role)
+    {
+        var claimed = Trail.For(SessionTrail.KeyFor(mission.Id, role));
+
+        var window = claimed is null
+            ? TokensFor(mission.AgentId, WhereItWorks(mission))
+            : Context.ReadTranscript(claimed);
+
+        // The supervising role has no ledger of its own — it does not make attempts — so cost per
+        // finding has nothing to say about it and only the ceiling applies. Passing the worker's
+        // ledger in would judge the supervisor by the worker's productivity, which is somebody
+        // else's number.
+        var attempts = string.Equals(role, WorkerRole, StringComparison.OrdinalIgnoreCase)
+            ? FindMission(mission.Id)?.Ledger.Attempts ?? []
+            : [];
+
+        return HandoverWatch.Assess(attempts, window, Handover);
+    }
+
+    public const string WorkerRole = "worker";
+
+    public const string SupervisorRole = "supervisor";
 
     /// <summary>
     /// What the operator has delegated to a supervising session, re-read whenever the file changes.

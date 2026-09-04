@@ -63,6 +63,27 @@ public sealed class ContextMeter
         }
     }
 
+    /// <summary>
+    /// The window from one named transcript, rather than from whichever is newest in the folder.
+    /// </summary>
+    /// <remarks>
+    /// Needed the moment two sessions share a repository, which is what a run that improves this
+    /// tool looks like: the supervisor and the worker both write into the same project folder, and
+    /// "newest file" is then a coin toss between them. A per-role ceiling reading the wrong one
+    /// fires on somebody else's tokens.
+    /// </remarks>
+    public int? ReadTranscript(string transcript)
+    {
+        try
+        {
+            return File.Exists(transcript) ? ClaudeCodeProbe.WindowIn(transcript) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     public ContextReading Read(string agentId, string repositoryRoot)
     {
         foreach (var probe in _probes.Where(p => p.AgentId is null || p.AgentId == agentId))
