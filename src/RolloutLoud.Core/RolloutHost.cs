@@ -840,6 +840,9 @@ public sealed class RolloutHost
     /// <summary>Things the host did that belong in the operator's activity log.</summary>
     public event Action<string>? Logged;
 
+    /// <summary>Puts a line in the operator's activity log from outside the host.</summary>
+    public void Announce(string message) => Logged?.Invoke(message);
+
     public void SetActiveMission(string missionId)
     {
         lock (_gate)
