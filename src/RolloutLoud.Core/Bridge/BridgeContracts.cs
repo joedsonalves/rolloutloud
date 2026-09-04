@@ -157,6 +157,35 @@ public sealed record ReviewRequest
     public bool? Blocking { get; init; }
 }
 
+/// <summary>
+/// The agent bounding its own run, once it has learned where the boundary is.
+/// </summary>
+/// <remarks>
+/// Only ever narrows. A boundary that can be widened after the fact is a note the run edits when it
+/// becomes inconvenient, which is the drift the scope exists to stop.
+/// </remarks>
+public sealed record ScopeRequest
+{
+    /// <summary>Hosts, domains or CIDR blocks the run may touch from here.</summary>
+    public required IReadOnlyList<string> Targets { get; init; }
+
+    /// <summary>Carve-outs. These only ever accumulate.</summary>
+    public IReadOnlyList<string>? Exclusions { get; init; }
+
+    /// <summary>What permits reaching them: the programme, its policy URL, the engagement reference.</summary>
+    public string? Authorization { get; init; }
+}
+
+/// <summary>Asking for a launch button on a mission that already exists.</summary>
+public sealed record LaunchRequestBody
+{
+    /// <summary>Which CLI to open. Defaults to the one the mission is assigned to.</summary>
+    public string? Agent { get; init; }
+
+    /// <summary>Open it with approval prompts off.</summary>
+    public bool? Elevated { get; init; }
+}
+
 /// <summary>Declaring an attempt before running it. The hypothesis is required, and that is the point.</summary>
 public sealed record AdmitRequest
 {

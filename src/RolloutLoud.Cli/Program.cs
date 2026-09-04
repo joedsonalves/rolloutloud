@@ -37,6 +37,8 @@ internal static class Program
             "spend" => await SimpleGetAsync(paths, "/v1/missions/active/spend").ConfigureAwait(false),
             "wall" => await SimpleGetAsync(paths, "/v1/missions/active/wall").ConfigureAwait(false),
             "review" => await ReviewAsync(paths, rest).ConfigureAwait(false),
+            "scope" => await ScopeAsync(paths, rest).ConfigureAwait(false),
+            "launch" => await SimplePostAsync(paths, "/v1/missions/active/launch").ConfigureAwait(false),
             "status" => await StatusAsync(paths).ConfigureAwait(false),
             "mission" => await MissionAsync(paths, rest).ConfigureAwait(false),
             "briefing" => await BriefingAsync(paths, rest).ConfigureAwait(false),
@@ -676,6 +678,44 @@ internal static class Program
     }
 
     /// <summary>
+    /// Bounds the run to targets that were not known when the mission opened.
+    /// </summary>
+    /// <remarks>
+    /// For the run whose first job is to find out where the boundary is. It only ever narrows, so
+    /// there is no flag here that could widen one — if the work genuinely needs a target outside
+    /// the scope in force, that is a new mission and the operator opens it.
+    /// </remarks>
+    private static async Task<int> ScopeAsync(RolloutPaths paths, string[] args)
+    {
+        var targets = Positional(args, "--auth", "--exclude");
+
+        if (string.IsNullOrWhiteSpace(targets))
+        {
+            Console.Error.WriteLine(
+                "Usage: rollout scope \"a.example.com,*.staging.example.com\" " +
+                "--auth \"<what permits reaching them>\" [--exclude \"c,d\"]\n\n" +
+                "Narrows the run to these and nothing else. It cannot be widened afterwards.");
+            return 1;
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["targets"] = targets.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            ["authorization"] = Option(args, "--auth"),
+        };
+
+        if (Option(args, "--exclude") is { Length: > 0 } exclusions)
+        {
+            payload["exclusions"] = exclusions.Split(
+                ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+
+        return await SendAsync(
+            paths,
+            client => client.PostAsync("/v1/missions/active/scope", payload)).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Tells the agent what the deliverable still needs, after reading it.
     /// </summary>
     /// <remarks>
@@ -955,6 +995,12 @@ internal static class Program
                                              What has already been tried. Filtered and paged —
                                              there is no way to fetch the lot, on purpose.
               rollout spend                    What this mission has cost so far, against its cap.
+              rollout launch                   Ask for a launch button on the active mission.
+                                             Opens nothing: the operator clicks it, or you do if
+                                             they delegated it for this mission.
+              rollout scope "a.example.com,*.staging.example.com" --auth "<what permits it>"
+                                             Bound the run once you know where the boundary is.
+                                             Narrows only — it can never be widened.
               rollout review "<what it still needs>" [--missing "a,b,c"] [--blocking]
                                              Read the deliverable, then say what is missing. The
                                              agent gets it on its next 'continue', once. It never

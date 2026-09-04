@@ -113,6 +113,43 @@ public sealed class MissionEngine
     }
 
     /// <summary>
+    /// Bounds the run to targets that were not known when it opened.
+    /// </summary>
+    /// <remarks>
+    /// A gap this product had until a real run walked into it. The scope was create-time only —
+    /// fine when the operator knows the boundary in advance, useless when <em>finding</em> the
+    /// boundary is part of the job. A run whose first task is "pick a programme and work inside its
+    /// published scope" cannot name its targets on the command line that starts it, so it started
+    /// with no boundary at all: the one guard that matters most on that kind of work, off.
+    ///
+    /// It can only ever narrow. See <see cref="MissionScope.Narrow"/> for why that is the whole
+    /// feature rather than a detail — and note that this is the agent bounding itself, which stops
+    /// drift and stops nothing else. It is a guard rail like every other scope call, and the value
+    /// is that attempt forty is measured against what attempt one wrote down.
+    /// </remarks>
+    public ScopeNarrowing DeclareScope(
+        IReadOnlyList<string> targets,
+        IReadOnlyList<string> exclusions,
+        string? authorization)
+    {
+        lock (_gate)
+        {
+            var narrowing = Mission.Scope.Narrow(targets, exclusions, authorization);
+
+            if (!narrowing.Allowed)
+            {
+                Log("scope-refused", narrowing.Reason);
+                return narrowing;
+            }
+
+            Mission = Mission with { Scope = narrowing.Scope! };
+            Log("scope-declared", narrowing.Reason + " Authorised by: " + narrowing.Scope!.Authorization);
+            Persist();
+            return narrowing;
+        }
+    }
+
+    /// <summary>
     /// Records what the supervisor asked for after reading the deliverable.
     /// </summary>
     /// <remarks>

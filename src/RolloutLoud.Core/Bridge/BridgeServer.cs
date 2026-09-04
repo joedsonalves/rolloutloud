@@ -340,6 +340,14 @@ public sealed class BridgeServer : IAsyncDisposable
                     await ReviewAsync(context, engine).ConfigureAwait(false);
                     return;
 
+                case ("scope", "POST"):
+                    await DeclareScopeAsync(context, engine).ConfigureAwait(false);
+                    return;
+
+                case ("launch", "POST"):
+                    await RequestLaunchAsync(context, engine).ConfigureAwait(false);
+                    return;
+
                 case ("subagent", "POST"):
                     await SubagentAsync(context, engine).ConfigureAwait(false);
                     return;
@@ -839,6 +847,117 @@ public sealed class BridgeServer : IAsyncDisposable
                 blocking = r.Blocking,
                 at = r.At,
             }),
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Asks for a fresh launch button on a mission that already exists.
+    /// </summary>
+    /// <remarks>
+    /// The button used to be created once, when the mission was, and never again. So a launch that
+    /// failed — or a RolloutLoud that restarted, or a window the operator closed — left a live
+    /// mission with no way to open an agent on it, and the only route back was to create a second
+    /// mission for the same work. That is a workaround wearing a feature's clothes: it forks the
+    /// ledger, and the run loses the history that makes it worth having.
+    ///
+    /// Creating the button is not launching. It still waits for the operator's click, or for a
+    /// delegation they gave for this mission — one path to consent, no second door.
+    /// </remarks>
+    private async Task RequestLaunchAsync(HttpListenerContext context, MissionEngine engine)
+    {
+        var body = await ReadAsync<LaunchRequestBody>(context).ConfigureAwait(false);
+        var agentId = body?.Agent ?? engine.Mission.AgentId;
+
+        if (_host.FindAgent(agentId) is not { } descriptor)
+        {
+            await WriteAsync(context, HttpStatusCode.BadRequest, new ErrorResponse
+            {
+                Error = $"Unknown agent '{agentId}'.",
+                Hint = "Known: " + string.Join(", ", _host.Agents.Select(a => a.Id)),
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        var mode = body?.Elevated == true ? Agents.LaunchMode.Elevated : Agents.LaunchMode.Normal;
+        var button = _host.RequestLaunch(engine, descriptor, mode);
+
+        Logged?.Invoke($"A launch was requested for {engine.Mission.Id}. Click the button to open it.");
+
+        await WriteAsync(context, HttpStatusCode.Created, new
+        {
+            buttonId = button.Id,
+            title = button.Title,
+            workingDirectory = engine.Mission.WorkingDirectory ?? _host.Paths.RepositoryRoot,
+            next =
+                "Nothing has opened. The operator clicks that button — or you do, if they have " +
+                "delegated it for this mission — and it writes the mission block and starts the CLI.",
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The agent bounding its own run, once it has learned where the boundary is.
+    /// </summary>
+    /// <remarks>
+    /// The scope used to be create-time only, which is fine when the operator knows the boundary in
+    /// advance and useless when <em>finding</em> it is the job. A run told to pick a programme and
+    /// work inside its published scope cannot name its targets on the command line that starts it,
+    /// so it ran with no boundary at all — the guard that matters most on that kind of work, off,
+    /// for exactly the runs that need it.
+    ///
+    /// It only ever narrows, and the refusal on a widening is the point rather than an edge case.
+    /// The agent bounding itself stops drift and stops nothing else, which is all any scope call in
+    /// this product has ever done: attempt forty gets measured against what attempt one wrote down.
+    /// </remarks>
+    private async Task DeclareScopeAsync(HttpListenerContext context, MissionEngine engine)
+    {
+        var body = await ReadAsync<ScopeRequest>(context).ConfigureAwait(false);
+
+        if (body?.Targets is not { Count: > 0 })
+        {
+            await WriteAsync(context, HttpStatusCode.BadRequest, new ErrorResponse
+            {
+                Error = "'targets' is required.",
+                Hint =
+                    "Name the hosts, domains or CIDR blocks this run may touch, and 'authorization' " +
+                    "naming what permits reaching them — the programme, its policy URL, the " +
+                    "engagement reference.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        var narrowing = engine.DeclareScope(body.Targets, body.Exclusions ?? [], body.Authorization);
+
+        if (!narrowing.Allowed)
+        {
+            // 409 rather than 400: the request is well formed and was refused on policy. The agent
+            // has to tell those apart, because one is worth rephrasing and the other never is.
+            await WriteAsync(context, HttpStatusCode.Conflict, new ErrorResponse
+            {
+                Error = narrowing.Reason,
+                Hint =
+                    "A scope only ever narrows. If the work genuinely needs a target outside it, " +
+                    "that is a new mission and the operator opens it — not something you widen " +
+                    "your way into at attempt forty.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        var scope = narrowing.Scope!;
+
+        Logged?.Invoke($"🔒 {engine.Mission.Id} bounded to {string.Join(", ", scope.Targets)}");
+        Logged?.Invoke($"   authorised by: {scope.Authorization}");
+
+        await WriteAsync(context, HttpStatusCode.OK, new
+        {
+            bounded = true,
+            targets = scope.Targets,
+            exclusions = scope.Exclusions,
+            authorization = scope.Authorization,
+            reason = narrowing.Reason,
+            next =
+                "Every command you declare from here has to name one of these, or the bridge " +
+                "refuses it and the refusal goes into your ledger. You can narrow this again; you " +
+                "cannot widen it.",
         }).ConfigureAwait(false);
     }
 
