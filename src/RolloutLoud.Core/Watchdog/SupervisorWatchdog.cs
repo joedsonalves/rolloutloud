@@ -88,6 +88,8 @@ public sealed class SupervisorWatchdog : IAsyncDisposable
                 return;
             }
 
+            await CheckConsentAsync(cancellationToken).ConfigureAwait(false);
+
             foreach (var engine in _host.Missions)
             {
                 // The delegation is the consent, and it is checked every pass rather than
@@ -113,6 +115,58 @@ public sealed class SupervisorWatchdog : IAsyncDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Notices when the run is editing the machinery that decides who may do what.
+    /// </summary>
+    /// <remarks>
+    /// Detected rather than self-reported: asking the session to declare this would be asking the
+    /// thing being watched to raise its own hand. And written to a file as well as the log, because
+    /// the operator chose to be warned rather than asked, and the premise of the mission they set is
+    /// that they are not reading the log while it happens.
+    ///
+    /// Only announced when the set of touched files <em>changes</em>. A supervisor working on the
+    /// consent code for an hour would otherwise produce sixty identical warnings, which is how a
+    /// warning stops being read.
+    /// </remarks>
+    private async Task CheckConsentAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var status = await Execution.ProcessLauncher.RunShellAsync(
+                "git status --porcelain",
+                _host.Paths.RepositoryRoot,
+                TimeSpan.FromSeconds(20),
+                cancellationToken).ConfigureAwait(false);
+
+            var touched = Consent.ConsentWatch.Touched(
+                Consent.ConsentWatch.PathsIn(status.StandardOutput));
+
+            var signature = string.Join("|", touched);
+
+            if (touched.Count == 0 || signature == _lastConsentSignature)
+            {
+                _lastConsentSignature = signature;
+                return;
+            }
+
+            _lastConsentSignature = signature;
+
+            var line = Consent.ConsentWatch.Describe(touched, "this run");
+            _host.Announce("⚠ " + line);
+
+            var record = Path.Combine(_host.Paths.StateRoot, "consent-changes.log");
+            await File.AppendAllTextAsync(record, line + Environment.NewLine, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Not a git repository, git not installed, a locked index mid-commit. None of those is
+            // worth stopping the watchdog over, and none of them is evidence of anything.
+        }
+    }
+
+    private string _lastConsentSignature = string.Empty;
 
     /// <summary>
     /// When the deliverable was last written, or null when there is nothing to look at.
