@@ -308,6 +308,35 @@ at the machine.
 The directory has to exist; a missing one is refused when the mission is created, while you are
 still looking at the command you typed.
 
+### `POST /v1/missions/active/review` — the supervisor says what the deliverable still needs
+
+The bridge's other direction. Everything else here carries what the agent did; this carries what
+somebody who read the result wants next.
+
+```bash
+curl -X POST "$EP/v1/missions/active/review" -H "X-RolloutLoud-Token: $TK" -d '{
+  "note": "the plan never says what happens when the cutover fails halfway",
+  "missing": ["a rollback path", "who is paged at 3am"],
+  "blocking": true
+}'
+```
+
+The agent collects it on its **next `/continue`**, appended to the directive and repeated as
+`fromSupervisor` — that call is the one it already has to make, and a channel it must remember to
+poll separately is one that goes unread on the run where it mattered. **Delivered once**, then kept
+on the mission as the record of how the run was steered.
+
+⚠️ **It never stops the run, and there is no flag that would.** A supervisor is not a stop
+condition — the gate and the budgets are — and a second model able to end a run is the
+self-judgement this tool exists to remove, wearing a reviewer's hat. `blocking` means *do this
+next*, never *stop*.
+
+Every note goes to the operator's activity log. Behind the Fourth Wall the supervisor is steering a
+run whose raw material the operator cannot see; if the steering were invisible too, they would have
+delegated their eyes and their voice and kept only the bill.
+
+`rollout review "<what it still needs>" [--missing "a,b,c"] [--blocking]`
+
 ### `GET /v1/missions/active/wall` — what is being kept from me?
 
 A **Fourth Wall** mission withholds its raw material from whoever reads it through the bridge:

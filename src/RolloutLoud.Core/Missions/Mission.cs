@@ -66,9 +66,10 @@ public sealed record Mission
     /// The one path behind the wall the supervisor is meant to read, relative to the repository.
     /// </summary>
     /// <remarks>
-    /// The window in the wall, and the thing that makes this mode usable rather than blind. The
-    /// supervisor reads the report draft and says what is missing; that is reviewing. Reading the
-    /// scan output that produced it is not.
+    /// The window in the wall, and the thing that makes this mode usable rather than blind. It is
+    /// whatever the run is <em>for</em> — a migration plan, a benchmark write-up, a design note, a
+    /// findings report. The supervisor reads it and says what is missing; that is reviewing.
+    /// Reading the output that produced it is not.
     ///
     /// Named on the mission so both sides agree what it is before the work starts, rather than the
     /// supervisor discovering at review time that the deliverable is somewhere it did not look.
@@ -93,6 +94,16 @@ public sealed record Mission
     /// waits for the operator, the same way anything else that needs a human does.
     /// </remarks>
     public string? WorkingDirectory { get; init; }
+
+    /// <summary>
+    /// What the supervisor has said after reading the deliverable, oldest first.
+    /// </summary>
+    /// <remarks>
+    /// Kept on the mission rather than in the ledger because it points the other way: the ledger is
+    /// what the agent tried, and this is what somebody reading the result asked for next. Mixing
+    /// them would make "what has been ruled out" answer with instructions.
+    /// </remarks>
+    public IReadOnlyList<SupervisorNote> Reviews { get; init; } = [];
 
     /// <summary>Whether the agent will work somewhere other than RolloutLoud's own anchor.</summary>
     public bool WorksElsewhere(string anchor) =>

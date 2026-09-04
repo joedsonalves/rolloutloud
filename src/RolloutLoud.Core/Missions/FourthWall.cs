@@ -14,14 +14,16 @@ namespace RolloutLoud.Core.Missions;
 /// forty failures' worth of tunnel vision. That applies at least as much to the session doing the
 /// judging — and it is the session whose context is most expensive to fill.
 ///
-/// <b>In a pentest, target output is attacker-controlled.</b> The injection guard exists because
-/// that text reaches contexts and persists in the ledger. Keeping the supervising session out of
-/// the raw traffic removes it from the blast radius entirely, rather than fencing it and hoping.
+/// <b>Raw output is often written by somebody who did not agree to be trusted.</b> A scraped page,
+/// a third-party API, a scanner reading a target, a repository being audited. The injection guard
+/// exists because that text reaches contexts and then persists in the ledger; keeping the
+/// supervising session out of it removes it from the blast radius rather than fencing it and
+/// hoping. On a pentest that is acute, but it is not only a pentest concern.
 ///
 /// <b>The wall has exactly one window, and it is the deliverable.</b> See
 /// <see cref="Mission.Deliverable"/>: the one path the supervisor is meant to read, because it is
-/// the thing the work is for. Reading the report and saying what is missing is the job; reading the
-/// scan output is not.
+/// the thing the work is <em>for</em> — a plan, a write-up, a report, a design note. Reading that
+/// and saying what is missing is the job; reading the output that produced it is not.
 ///
 /// ⚠️ <b>This is a guard rail, not a sandbox</b>, in exactly the sense <see cref="MissionScope"/>
 /// is. It redacts what the bridge serves. It cannot stop a supervising session from opening a run

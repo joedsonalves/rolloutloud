@@ -287,6 +287,7 @@ rollout attempt  "<hypothesis>" "<command>" --outcome failed --learned "…"
 rollout ledger ["<text>"] [--outcome …] [--agent …] [--tier N] [--since …] [--limit N] [--full]
 rollout spend
 rollout wall
+rollout review "<what it still needs>" [--missing "a,b,c"] [--blocking]
 rollout continue
 rollout gate
 
@@ -614,10 +615,10 @@ Turn it on when a session is going to **steer** a run rather than work it: you, 
 acting as the reviewer.
 
 ```
-rollout mission "reach a critical inside the declared scope" \
+rollout mission "make the flaky checkout suite reproducible, then fix it" \
         --gate "test -f findings/critical.json" \
         --scope "app.example.com" --auth "PO-4471, signed by the programme" \
-        --fourth-wall --deliverable "report/DRAFT.md"
+        --fourth-wall --deliverable "docs/PLAN.md"
 ```
 
 **It is not "you see nothing".** It is *you see the deliverable and the ledger, not the raw
@@ -649,8 +650,8 @@ another repository, in its own process**, means it was never in reach to begin w
 is then the backstop, not the whole mechanism.
 
 ```
-rollout mission "reach a critical and reproduce it in the report draft" \
-        --fourth-wall --deliverable "report/DRAFT.md" \
+rollout mission "produce the migration plan for the queue rewrite" \
+        --fourth-wall --deliverable "docs/PLAN.md" \
         --at "C:\JOEDSON\PROGRAMACAO\PENTEST" --elevated
 ```
 
@@ -668,10 +669,27 @@ reaches that button: the click *is* the consent.
 
 ### The wall has one window, and it is the deliverable
 
-`--deliverable report/DRAFT.md` names the one path behind the wall the supervisor is meant to read.
-Named up front so both sides agree what the work is *for*, rather than the reviewer finding out at
-review time that it was somewhere else. Reading the report and saying what is missing is the job;
-reading the scan output that produced it is not.
+`--deliverable docs/PLAN.md` names the one path behind the wall the supervisor is meant to read:
+whatever this run is *for*. A migration plan, a benchmark write-up, a design note, a findings
+report. Named up front so both sides agree what the work is for, rather than the reviewer finding
+out at review time that it was somewhere else.
+
+Reading it and saying what is missing is the job; reading the output that produced it is not — and
+that is the whole loop:
+
+```
+rollout review "the plan never says what happens when the cutover fails halfway" \
+        --missing "a rollback path,who is paged at 3am" --blocking
+```
+
+The agent collects that on its **next `rollout continue`** — the call it already makes between
+attempts — appended to its directive. Delivered once, then kept on the mission as the record of how
+the run was steered, and shown in your activity log as it happens.
+
+⚠️ **A review never stops the run, and there is no flag that would.** A supervisor is not a stop
+condition — the gate and the budgets are — and a second model able to end a run is the
+self-judgement this tool exists to remove, wearing a reviewer's hat. `--blocking` means *do this
+next*, never *stop*.
 
 ### Authorisation stops being optional
 

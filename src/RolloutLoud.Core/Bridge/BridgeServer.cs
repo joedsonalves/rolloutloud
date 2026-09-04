@@ -336,6 +336,10 @@ public sealed class BridgeServer : IAsyncDisposable
                     await WallAsync(context, engine).ConfigureAwait(false);
                     return;
 
+                case ("review", "POST"):
+                    await ReviewAsync(context, engine).ConfigureAwait(false);
+                    return;
+
                 case ("subagent", "POST"):
                     await SubagentAsync(context, engine).ConfigureAwait(false);
                     return;
@@ -809,15 +813,94 @@ public sealed class BridgeServer : IAsyncDisposable
         var decision = engine.ShouldContinue();
         var progress = ProgressMeter.Assess(engine.Ledger.Attempts);
 
-        await WriteAsync(context, HttpStatusCode.OK, new ContinueResponse
+        // Notes ride out on this call because it is the one the agent already has to make between
+        // attempts. A channel the agent must remember to poll separately is a channel that goes
+        // unread on the run where it mattered.
+        var reviews = engine.CollectReviews();
+
+        await WriteAsync(context, HttpStatusCode.OK, new
         {
-            Continue = decision.Continue,
-            Directive = decision.Reason,
-            State = engine.Mission.State.ToString(),
-            Tier = engine.Mission.EscalationTier,
-            Attempts = engine.Ledger.Count,
-            ProgressTrend = progress.Trend.ToString().ToLowerInvariant(),
-            ProgressVerdict = progress.Verdict,
+            @continue = decision.Continue,
+            directive = reviews.Count == 0
+                ? decision.Reason
+                : decision.Reason + Environment.NewLine + Environment.NewLine +
+                  string.Join(Environment.NewLine + Environment.NewLine, reviews.Select(r => r.ForAgent())),
+            state = engine.Mission.State.ToString(),
+            tier = engine.Mission.EscalationTier,
+            attempts = engine.Ledger.Count,
+            progressTrend = progress.Trend.ToString().ToLowerInvariant(),
+            progressVerdict = progress.Verdict,
+            fromSupervisor = reviews.Select(r => new
+            {
+                id = r.Id,
+                from = r.From,
+                note = r.Note,
+                missing = r.Missing,
+                blocking = r.Blocking,
+                at = r.At,
+            }),
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The supervisor saying what the deliverable still needs.
+    /// </summary>
+    /// <remarks>
+    /// The other direction of the bridge, and the thing that was missing: the ledger records what
+    /// the agent tried, and until now nothing carried a sentence back. Behind the Fourth Wall a
+    /// supervisor reads the deliverable and forms an opinion, and without this there was nowhere to
+    /// put it.
+    ///
+    /// It never changes the mission's state. A supervisor is not a stop condition — the gate and
+    /// the budgets are — and giving a second model the power to end a run would put back exactly
+    /// the self-judgement this product exists to remove.
+    /// </remarks>
+    private async Task ReviewAsync(HttpListenerContext context, MissionEngine engine)
+    {
+        var body = await ReadAsync<ReviewRequest>(context).ConfigureAwait(false);
+
+        if (body is null || string.IsNullOrWhiteSpace(body.Note))
+        {
+            await WriteAsync(context, HttpStatusCode.BadRequest, new ErrorResponse
+            {
+                Error = "'note' is required.",
+                Hint =
+                    "Say what the deliverable still needs, in a sentence the agent can act on. " +
+                    "Add 'missing' as a list for the specific gaps — a list survives being skimmed " +
+                    "and a paragraph does not.",
+            }).ConfigureAwait(false);
+            return;
+        }
+
+        var note = engine.Review(new SupervisorNote
+        {
+            Id = SupervisorNote.NewId(),
+            From = body.From ?? "the supervisor",
+            Note = body.Note.Trim(),
+            Missing = body.Missing ?? [],
+            Blocking = body.Blocking == true,
+        });
+
+        // Loudly, and never as though the tool said it. Behind the wall the operator cannot see the
+        // raw material the supervisor is judging — so if the steering were invisible too, they
+        // would have delegated their eyes and their voice and kept only the bill.
+        Logged?.Invoke($"📝 {note.From} reviewed the deliverable: {note.Note}");
+
+        foreach (var missing in note.Missing)
+        {
+            Logged?.Invoke($"   still missing: {missing}");
+        }
+
+        await WriteAsync(context, HttpStatusCode.Created, new
+        {
+            id = note.Id,
+            recorded = true,
+            deliverable = engine.Mission.Deliverable,
+            next =
+                "The agent gets this on its next /continue, once. It does not stop the run — a " +
+                "supervisor is not a stop condition, the gate is. If the work is genuinely " +
+                "finished, ask the gate; if it is genuinely hopeless, that is a stop condition's " +
+                "job, not yours.",
         }).ConfigureAwait(false);
     }
 
