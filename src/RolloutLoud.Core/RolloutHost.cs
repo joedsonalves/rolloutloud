@@ -751,7 +751,7 @@ public sealed class RolloutHost
         ProcessLauncher.Launch(new LaunchRequest
         {
             Executable = agent.Executable,
-            Arguments = agent.ArgumentsFor(mode),
+            Arguments = agent.ArgumentsFor(mode, Opening(agent, mission)),
             WorkingDirectory = workingDirectory,
             InTerminal = true,
             Environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -763,6 +763,26 @@ public sealed class RolloutHost
             },
         });
     }
+
+    /// <summary>
+    /// The first thing said to a freshly launched agent, or null when there is no mission.
+    /// </summary>
+    /// <remarks>
+    /// Short on purpose. The briefing is already in the instruction file the CLI loads at startup,
+    /// so repeating it here would spend context on a second copy of something already read. What
+    /// this has to do is get the session moving and point at the one thing the file cannot carry:
+    /// which mission id it is on, so the bridge calls resolve even when several are open.
+    ///
+    /// Without a mission there is no opening line at all — a launch button with no mission is the
+    /// operator opening a terminal, and putting words in it would be presumptuous.
+    /// </remarks>
+    private static string? Opening(AgentDescriptor agent, MissionEngine? mission) =>
+        mission is null
+            ? null
+            : $"Start the mission in {agent.InstructionFile} now. Read this repository's own " +
+              "standing rules first, declare your first attempt to the bridge before you run " +
+              "anything, and keep going until the gate says otherwise. Mission id: " +
+              mission.Mission.Id + ".";
 
     public string? BridgeEndpoint { get; internal set; }
 
