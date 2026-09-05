@@ -510,8 +510,6 @@ public sealed class BridgeServer : IAsyncDisposable
             ScopeExclusions = body.ScopeExclusions ?? [],
             Authorization = body.Authorization,
             MaxAttempts = body.MaxAttempts,
-            MaxHours = body.MaxHours,
-            MaxSpendUsd = body.MaxSpendUsd,
             Offload = body.Offload,
             Rationale = body.Rationale,
             Review = new GateReview { Findings = [], Headline = string.Empty },
@@ -684,8 +682,6 @@ public sealed class BridgeServer : IAsyncDisposable
             Stop = new StopConditions
             {
                 MaxAttempts = body.MaxAttempts is > 0 ? body.MaxAttempts.Value : 200,
-                MaxWallClock = TimeSpan.FromHours(body.MaxHours is > 0 ? body.MaxHours.Value : 6),
-                MaxSpendUsd = body.MaxSpendUsd is > 0m ? body.MaxSpendUsd : null,
             },
             Offload = new OffloadSettings
             {
@@ -906,6 +902,13 @@ public sealed class BridgeServer : IAsyncDisposable
         // and a handover written by an exhausted session is the transcript it was meant to replace.
         var handover = _host.ShouldHandOver(engine.Mission, RolloutHost.WorkerRole);
 
+        // Whether this is the turn the session is actually replaced on, which needs a handover note
+        // it has written and no swap has used yet. Decided before the response so the directive can
+        // say which of the two it is — "write your handover" and "you are being replaced now" are
+        // different instructions, and telling an agent the first when the second is true wastes its
+        // last turn.
+        var swapping = handover.HandOver && _host.HandoverIsReady(engine.Mission, RolloutHost.WorkerRole);
+
         await WriteAsync(context, HttpStatusCode.OK, new
         {
             @continue = decision.Continue,
@@ -915,7 +918,8 @@ public sealed class BridgeServer : IAsyncDisposable
                     .Concat(answers.Select(a => a.ForAgent()))
                     .Concat(reviews.Select(r => r.ForAgent()))
                     .Concat(handover.HandOver
-                        ? [$"⚠️ {handover.Detail}.{Environment.NewLine}{Environment.NewLine}{HandoverWatch.HandoverPrompt}"]
+                        ? [$"⚠️ {handover.Detail}.{Environment.NewLine}{Environment.NewLine}" +
+                           (swapping ? HandoverWatch.ReplacedPrompt : HandoverWatch.HandoverPrompt)]
                         : Array.Empty<string>())),
             state = engine.Mission.State.ToString(),
             tier = engine.Mission.EscalationTier,
@@ -938,7 +942,17 @@ public sealed class BridgeServer : IAsyncDisposable
                 blocking = r.Blocking,
                 at = r.At,
             }),
+            handingOver = swapping,
         }).ConfigureAwait(false);
+
+        // ⚠️ After the response, never before. Replacing the worker retires its window, and killing
+        // that window kills the CLI inside it — which is the CLI waiting on this very reply. Swap
+        // first and the caller dies mid-request, sees a dropped connection, and the last thing the
+        // run records is a network error rather than a handover.
+        if (swapping && _host.TryHandOver(engine, RolloutHost.WorkerRole) is { } said)
+        {
+            Logged?.Invoke(said);
+        }
     }
 
     /// <summary>
@@ -1481,18 +1495,13 @@ public sealed class BridgeServer : IAsyncDisposable
     /// </remarks>
     private async Task SpendAsync(HttpListenerContext context, MissionEngine engine)
     {
-        var verdict = _host.SpendOn(engine.Mission);
-        var reading = verdict.Reading;
-        var cap = engine.Mission.Stop.MaxSpendUsd;
+        var reading = _host.SpendReading(engine.Mission);
 
         await WriteAsync(context, HttpStatusCode.OK, new
         {
             usd = reading.Usd,
             source = reading.Source.ToString().ToLowerInvariant(),
             detail = reading.Detail,
-            capUsd = cap,
-            remainingUsd = cap is null || !reading.HasNumber ? null : (decimal?)(cap.Value - reading.Usd),
-            overBudget = verdict.OverBudget,
             unpricedTokens = reading.UnpricedTokens,
             byModel = reading.ByModel.Select(m => new
             {
@@ -1503,11 +1512,9 @@ public sealed class BridgeServer : IAsyncDisposable
                 cacheWriteTokens = m.CacheWriteTokens,
                 cacheReadTokens = m.CacheReadTokens,
             }),
-            note = cap is null
-                ? "No money cap on this mission. The attempt and wall-clock caps still apply."
-                : reading.HasNumber
-                    ? "Spend it on the experiment most likely to move the gate, not the cheapest one."
-                    : "Nothing can read this agent's token counts, so the figure is what RolloutLoud sent.",
+            note = reading.HasNumber
+                ? "Spend is reported for diagnostics and does not stop the mission."
+                : "Nothing can read this agent's token counts.",
         }).ConfigureAwait(false);
     }
     /// <summary>

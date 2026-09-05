@@ -184,28 +184,20 @@ public sealed record Mission
 }
 
 /// <summary>
-/// The brakes. "Relentless" without these is just an unbounded spend, and the first long night
-/// proved it: a loop with no wall clock does not stop when you go to sleep.
+/// The brake. "Relentless" without it is a loop with no end: an agent that cannot satisfy its gate
+/// will try the same shape of thing until something outside it says stop.
 /// </summary>
+/// <remarks>
+/// The attempt cap is the only one, and that is deliberate. A wall clock and a spend cap both used
+/// to sit here, and both stopped runs by a measure the agent had no control over — an operator who
+/// steps away comes back to a mission that was ended by the clock rather than by the work, and the
+/// only thing to do about it is raise the number and resume. Attempts count moves, which is the
+/// thing the mission is actually made of. The window ceiling that hands one session over to the
+/// next is a handover, not a stop, and lives with the context meter.
+/// </remarks>
 public sealed record StopConditions
 {
     public int MaxAttempts { get; init; } = 200;
-
-    public TimeSpan MaxWallClock { get; init; } = TimeSpan.FromHours(6);
-
-    /// <summary>
-    /// Dollars this mission may spend before it stops. Null means no money cap.
-    /// </summary>
-    /// <remarks>
-    /// The cap the other two do not cover. Attempts count moves and the clock counts minutes, and a
-    /// six-hour run with offload on can make a hundred cheap attempts or twenty expensive ones —
-    /// only one of those is a bill the operator would have agreed to in advance.
-    ///
-    /// ⚠️ Null rather than a default figure, and that is not laziness. Any number picked here would
-    /// be wrong for somebody, and a cap the operator did not choose is one they will not believe
-    /// when it fires — they will raise it without reading it, which is worse than not having one.
-    /// </remarks>
-    public decimal? MaxSpendUsd { get; init; }
 
     /// <summary>
     /// Consecutive attempts that produced no new information before the ladder is forced upward.

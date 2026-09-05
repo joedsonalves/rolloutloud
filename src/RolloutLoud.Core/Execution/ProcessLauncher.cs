@@ -15,6 +15,9 @@ public sealed record LaunchRequest
     /// <summary>Open in the operator's terminal instead of capturing output. True for the CLI buttons.</summary>
     public bool InTerminal { get; init; }
 
+    /// <summary>Console window title, so a screen with two of these open says which is which.</summary>
+    public string? WindowTitle { get; init; }
+
     public IReadOnlyDictionary<string, string> Environment { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }
@@ -166,7 +169,11 @@ public static class ProcessLauncher
     {
         if (!request.InTerminal)
         {
-            var direct = new ProcessStartInfo { FileName = request.Executable };
+            var direct = new ProcessStartInfo
+            {
+                FileName = request.Executable,
+                WorkingDirectory = request.WorkingDirectory,
+            };
             foreach (var argument in request.Arguments)
             {
                 direct.ArgumentList.Add(argument);
@@ -179,28 +186,37 @@ public static class ProcessLauncher
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            // `start` gives the agent its own window; the quoted "RolloutLoud" is the title
-            // argument, and leaving it out makes `start` swallow the first quoted token as the
-            // title instead of running it — a silent no-op that looks like the button did nothing.
+            // ⚠️ No `start`, and dropping it is the point of this shape.
+            //
+            // `cmd /c start "RolloutLoud" ... cmd /k <cli>` did give the agent its own window, but
+            // the process it hands back is the `cmd /c start`, which exits the instant the window
+            // exists. The window is a GRANDCHILD. So the handle RolloutLoud held could never close
+            // what RolloutLoud had opened — and a supervisor woken every fifteen minutes against a
+            // question nobody could answer left seventeen windows on screen in one afternoon.
+            //
+            // cmd.exe launched directly IS the window. RolloutLoud is a WinExe and has no console
+            // of its own, so Windows allocates a fresh one for this child, and
+            // Kill(entireProcessTree: true) closes it together with the CLI running inside it.
+            // The working directory comes from the ProcessStartInfo instead of `start /D`, which
+            // also retires the quoting that `/D` needed.
             //
             // ⚠️ Arguments, NOT ArgumentList, and this one cost a real failed launch. ArgumentList
             // escapes for the C runtime: an argument containing quotes comes out with every `"`
             // rewritten as `\"`. cmd.exe has no backslash escape, so it sees a stray backslash
-            // glued to each quote — the working directory arrives as `\C:\...\ROLLOUTLOUD\`, start
-            // cannot find it, and the operator gets a dialog naming the tail of their own path.
-            //
-            // It only shows when the path contains a space, which is why it survived: the command
-            // line was verified as a STRING and never actually run from a folder like
-            // "MEU PROJETOS - PROGRAMAS". Setting Arguments passes the line through verbatim, which
-            // is what a shell that does its own quoting needs.
-            var info = new ProcessStartInfo
+            // glued to each quote. It only shows when a path contains a space, which is why it
+            // survived — the command line was verified as a STRING and never run from a folder
+            // like "MEU PROJETOS - PROGRAMAS". Setting Arguments passes the line through verbatim,
+            // which is what a shell that does its own quoting needs.
+            return new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments =
-                    "/c start \"RolloutLoud\" /D \"" + request.WorkingDirectory + "\" cmd /k " + commandLine,
-            };
+                Arguments = "/k " + Title(request.WindowTitle) + commandLine,
 
-            return info;
+                // Set here rather than only in Launch, so the folder the window opens in is part
+                // of what a test can read. `start /D` used to carry it, and that was the argument
+                // whose quoting broke on a path with a space in it.
+                WorkingDirectory = request.WorkingDirectory,
+            };
         }
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
@@ -220,6 +236,27 @@ public static class ProcessLauncher
         linux.ArgumentList.Add("-e");
         linux.ArgumentList.Add(commandLine);
         return linux;
+    }
+
+    /// <summary>
+    /// A `title` command for the console window, so the operator can tell the windows apart.
+    /// </summary>
+    /// <remarks>
+    /// Stripped to letters, digits, spaces and dashes before it goes anywhere near the command
+    /// line. The title is the one part of this string that could carry text from outside — a role
+    /// name today, a mission objective the day somebody finds that useful — and cmd has no
+    /// escaping worth trusting for the rest.
+    /// </remarks>
+    private static string Title(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return string.Empty;
+        }
+
+        var safe = new string([.. title.Where(c => char.IsLetterOrDigit(c) || c is ' ' or '-')]).Trim();
+
+        return safe.Length == 0 ? string.Empty : "title " + safe + " & ";
     }
 
     private static async Task PumpAsync(StreamReader reader, StringBuilder sink, CancellationToken cancellationToken)

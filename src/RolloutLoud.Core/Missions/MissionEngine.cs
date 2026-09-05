@@ -54,17 +54,6 @@ public sealed class MissionEngine
     /// </remarks>
     public Func<string, int?>? ReadContextTokens { get; set; }
 
-    /// <summary>
-    /// Answers whether the mission has spent its money budget. Null means no money brake.
-    /// </summary>
-    /// <remarks>
-    /// A callback for the same reason as <see cref="ReadContextTokens"/>: the spend meter reads
-    /// another program's transcripts and prices them from a file, and none of that may be a
-    /// dependency of the engine. Left null in a test, the money cap simply does not exist, which is
-    /// also what it means on a machine where nothing can be read.
-    /// </remarks>
-    public Func<Mission, Money.BudgetVerdict>? ReadSpend { get; set; }
-
     public Mission Mission { get; private set; }
 
     public MissionLedger Ledger { get; }
@@ -536,23 +525,6 @@ public sealed class MissionEngine
         if (Ledger.Count >= Mission.Stop.MaxAttempts)
         {
             Exhaust($"Attempt cap reached ({Mission.Stop.MaxAttempts}).");
-            return new ContinuationDecision(false, Mission.Resolution!);
-        }
-
-        var startedAt = Mission.StartedAt;
-        if (startedAt is not null && DateTimeOffset.UtcNow - startedAt > Mission.Stop.MaxWallClock)
-        {
-            Exhaust($"Wall-clock budget spent ({Mission.Stop.MaxWallClock:g}).");
-            return new ContinuationDecision(false, Mission.Resolution!);
-        }
-
-        // Money last of the three, because it is the only one that costs a file read to answer.
-        // The other two are arithmetic on state already in hand; this one walks a transcript, so
-        // asking it after they have both said "keep going" means a run that was going to stop
-        // anyway never pays for it.
-        if (ReadSpend?.Invoke(Mission) is { OverBudget: true } over)
-        {
-            Exhaust(over.Reason);
             return new ContinuationDecision(false, Mission.Resolution!);
         }
 

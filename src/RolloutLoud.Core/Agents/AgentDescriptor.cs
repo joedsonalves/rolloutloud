@@ -32,11 +32,45 @@ public sealed record AgentDescriptor
     /// <summary>Executable name resolved through PATH, or an absolute path.</summary>
     public required string Executable { get; init; }
 
-    /// <summary>Arguments for an ordinary interactive session.</summary>
+    /// <summary>
+    /// Arguments for an interactive session RolloutLoud opens.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>These carry the CLI's bypass flag, same as <see cref="ElevatedArguments"/>.</b> Every
+    /// session RolloutLoud opens is one the operator is not sitting in front of — that is what the
+    /// tool is for — and a CLI that stops to ask permission in a window nobody is watching is a CLI
+    /// that does nothing until somebody comes back. The consent moved to opening RolloutLoud; see
+    /// the broker decision in CLAUDE.md.
+    ///
+    /// What still separates the two lists is <see cref="RequiresOsElevation"/>, which is a genuinely
+    /// different question: the flag stops the prompts, and an elevated process gets the rights.
+    /// Confusing them is how you get a CLI that never asks and still cannot bind a privileged port.
+    /// </remarks>
     public IReadOnlyList<string> NormalArguments { get; init; } = [];
 
     /// <summary>Arguments that turn approval prompts off. The whole point of the elevated button.</summary>
     public IReadOnlyList<string> ElevatedArguments { get; init; } = [];
+
+    /// <summary>
+    /// One-shot invocation for a round with nobody watching. <c>{prompt}</c> is substituted.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="PromptArguments"/> because the bypass flag does not go in the same
+    /// place for every CLI — Codex wants it after <c>exec</c>, Hermes takes it globally before the
+    /// subcommand — and a rule that guesses the position produces an argv the CLI rejects, which
+    /// surfaces as a round that "ran" and returned nothing.
+    ///
+    /// ⚠️ <b>This is the list that was missing, and its absence was invisible.</b> Supervised and
+    /// subagent rounds built their argv from <see cref="PromptArguments"/> alone, so the two
+    /// mechanisms that exist specifically to work unattended were the two that could read but not
+    /// write. A reconnaissance round comes back "succeeded" and well-formed whether the agent chose
+    /// not to write or could not.
+    ///
+    /// Empty falls back to <see cref="PromptArguments"/>, so an operator's existing
+    /// <c>agents.json</c> keeps working — with the old behaviour, which is the honest fallback:
+    /// inventing a flag for a CLI we have no entry for would be worse than leaving it as it was.
+    /// </remarks>
+    public IReadOnlyList<string> HeadlessArguments { get; init; } = [];
 
     /// <summary>
     /// True when the CLI genuinely needs an OS-elevated process, not just its own bypass flag.
@@ -59,6 +93,13 @@ public sealed record AgentDescriptor
 
     public IReadOnlyList<string> ArgumentsFor(LaunchMode mode) =>
         mode == LaunchMode.Elevated ? ElevatedArguments : NormalArguments;
+
+    /// <summary>The argv for a headless round, with the prompt substituted in.</summary>
+    public IReadOnlyList<string> HeadlessArgumentsFor(string prompt) =>
+    [
+        .. (HeadlessArguments.Count > 0 ? HeadlessArguments : PromptArguments)
+            .Select(a => a.Replace("{prompt}", prompt, StringComparison.Ordinal)),
+    ];
 
     /// <summary>
     /// The launch arguments plus an opening line, so the session starts working instead of waiting.

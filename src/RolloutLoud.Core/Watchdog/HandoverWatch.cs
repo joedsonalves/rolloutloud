@@ -131,4 +131,20 @@ public static class HandoverWatch
         "The ledger already says what you tried, so do not repeat it. Say the things it cannot " +
         "carry. Then carry on — you are not finished, and RolloutLoud will open your replacement " +
         "when it makes sense.";
+
+    /// <summary>
+    /// What the outgoing session is told on the turn it is actually replaced.
+    /// </summary>
+    /// <remarks>
+    /// Said plainly, because the alternative is a window that simply stops answering. The sentence
+    /// above used to be the only one there was, and it promised a replacement that nothing opened —
+    /// so a session wrote its handover, was told to carry on, and carried on for the rest of the
+    /// run in the same expensive window.
+    /// </remarks>
+    public const string ReplacedPrompt =
+        "Your handover is recorded and RolloutLoud is opening your replacement now. **Stop here.** " +
+        "Do not start another attempt — a fresh session is picking this up with your note, the " +
+        "ledger and the mission block, and two sessions on one ledger is exactly what this swap " +
+        "exists to avoid.\n\n" +
+        "This window is finished. Nothing you type into it after this is part of the run.";
 }

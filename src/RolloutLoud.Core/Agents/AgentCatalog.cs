@@ -24,8 +24,9 @@ public static class AgentCatalog
             Id = Claude,
             DisplayName = "Claude Code",
             Executable = "claude",
-            NormalArguments = [],
+            NormalArguments = ["--dangerously-skip-permissions"],
             ElevatedArguments = ["--dangerously-skip-permissions"],
+            HeadlessArguments = ["--dangerously-skip-permissions", "-p", "{prompt}"],
             // CLAUDE.local.md, not CLAUDE.md, and the distinction is load-bearing.
             //
             // Claude Code auto-loads both at session start, so either would reach the agent. But
@@ -42,8 +43,11 @@ public static class AgentCatalog
             Id = Codex,
             DisplayName = "Codex CLI",
             Executable = "codex",
-            NormalArguments = [],
+            NormalArguments = ["--dangerously-bypass-approvals-and-sandbox"],
             ElevatedArguments = ["--dangerously-bypass-approvals-and-sandbox"],
+            // After `exec`, not before it. The flag is accepted in both places by the top-level
+            // command, but the subcommand is the position that is documented for a one-shot run.
+            HeadlessArguments = ["exec", "--dangerously-bypass-approvals-and-sandbox", "{prompt}"],
             InstructionFile = "AGENTS.md",
             PromptArguments = ["exec", "{prompt}"],
             Notes = "agents.notes.codex",
@@ -53,8 +57,10 @@ public static class AgentCatalog
             Id = Hermes,
             DisplayName = "Hermes",
             Executable = "hermes",
-            NormalArguments = ["chat"],
+            NormalArguments = ["chat", "--yolo"],
             ElevatedArguments = ["chat", "--yolo"],
+            // Global flag, so it goes BEFORE the subcommand here. See agents.notes.hermes.
+            HeadlessArguments = ["--yolo", "-z", "{prompt}"],
             InstructionFile = "HERMES.md",
             PromptArguments = ["-z", "{prompt}"],
             Notes = "agents.notes.hermes",
@@ -66,6 +72,10 @@ public static class AgentCatalog
             Executable = "openclaw",
             NormalArguments = ["tui"],
             ElevatedArguments = ["tui"],
+            // No HeadlessArguments, and that is not an omission. OpenClaw has no launch-time bypass
+            // flag at all — permission lives in `openclaw approvals` and `openclaw exec-policy`,
+            // which are persisted host state. Inventing one here would produce an argv it rejects.
+            // Set the exec policy once, by hand; see agents.notes.openclaw.
             InstructionFile = "OPENCLAW.md",
             PromptArguments = ["agent", "--message", "{prompt}"],
             Notes = "agents.notes.openclaw",

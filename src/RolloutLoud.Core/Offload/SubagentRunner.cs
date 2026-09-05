@@ -190,9 +190,10 @@ public sealed class SubagentRunner
     {
         var briefing = BriefingComposer.ForSubagent(mission.Mission, mission.Ledger, task);
 
-        var arguments = agent.PromptArguments
-            .Select(a => a.Replace("{prompt}", briefing, StringComparison.Ordinal))
-            .ToList();
+        // Same reasoning as a supervised round: nobody is watching this process, so the bypass
+        // flag travels with the argv. A subagent that cannot write is a subagent that can only
+        // report, and offload exists to get work done, not only to look at it.
+        var arguments = agent.HeadlessArgumentsFor(briefing);
 
         // Counted against the SUBAGENT, not the caller. That is the whole point of offload: the
         // briefing is what the fresh process pays for, and the main session pays only for the few

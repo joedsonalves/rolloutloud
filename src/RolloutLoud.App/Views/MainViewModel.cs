@@ -262,8 +262,6 @@ public sealed class MainViewModel : Observable
     private bool _offloadAlways = true;
     private int _tokenThreshold = 120_000;
     private int _maxAttempts = 200;
-    private double _maxHours = 6;
-    private decimal _maxSpendUsd;
     private bool _fourthWall;
     private string _deliverable = string.Empty;
     private bool _watchdogEnabled = true;
@@ -708,52 +706,6 @@ public sealed class MainViewModel : Observable
         set => Set(ref _maxAttempts, value);
     }
 
-    /// <summary>
-    /// Dollars this mission may spend. Zero means no money cap.
-    /// </summary>
-    /// <remarks>
-    /// Zero-means-off rather than a sensible default figure, and that is deliberate. Any number
-    /// picked here would be wrong for somebody, and a cap the operator did not choose is one they
-    /// will raise without reading when it fires — which is worse than not having one, because they
-    /// stop believing the brake.
-    /// </remarks>
-    public decimal MaxSpendUsd
-    {
-        get => _maxSpendUsd;
-        set
-        {
-            Set(ref _maxSpendUsd, value);
-            Raise(nameof(SpendSummary));
-        }
-    }
-
-    /// <summary>What the running mission has cost so far, next to the box where the cap is set.</summary>
-    /// <remarks>
-    /// Shown beside the field rather than in a panel of its own: the number that makes a cap
-    /// meaningful is what the last run actually cost, and an operator typing a figure with no idea
-    /// of the scale is guessing.
-    /// </remarks>
-    public string SpendSummary
-    {
-        get
-        {
-            if (_mission is null)
-            {
-                return Localizer.Current["stop.maxSpend.none"];
-            }
-
-            var reading = _host.SpendReading(_mission.Mission);
-
-            return reading.HasNumber ? reading.Summary : Localizer.Current["stop.maxSpend.none"];
-        }
-    }
-
-    public double MaxHours
-    {
-        get => _maxHours;
-        set => Set(ref _maxHours, value);
-    }
-
     public bool WatchdogEnabled
     {
         get => _watchdogEnabled;
@@ -1023,8 +975,6 @@ public sealed class MainViewModel : Observable
             Stop = new StopConditions
             {
                 MaxAttempts = Math.Max(1, MaxAttempts),
-                MaxWallClock = TimeSpan.FromHours(Math.Max(0.1, MaxHours)),
-                MaxSpendUsd = MaxSpendUsd > 0m ? MaxSpendUsd : null,
             },
             FourthWall = FourthWall,
             Deliverable = string.IsNullOrWhiteSpace(Deliverable) ? null : Deliverable.Trim(),
@@ -1320,7 +1270,6 @@ public sealed class MainViewModel : Observable
         Raise(nameof(MissionSummary));
         Raise(nameof(RelayHistory));
         Raise(nameof(ContextReadingSummary));
-        Raise(nameof(SpendSummary));
         Raise(nameof(WallSummary));
         Raise(nameof(ProgressSummary));
         Raise(nameof(PauseLabel));

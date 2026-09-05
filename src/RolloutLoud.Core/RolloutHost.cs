@@ -28,6 +28,9 @@ public sealed class RolloutHost
     private readonly Dictionary<string, MissionEngine> _engines = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FluidButton> _buttons = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MissionProposal> _proposals = new(StringComparer.Ordinal);
+
+    /// <summary>One CLI window per role, and the handle that can close it.</summary>
+    public OpenSessions Sessions { get; } = new();
     private ButtonAllowlist _allowlist = ButtonAllowlist.Empty;
     private DateTime _allowlistStamp = DateTime.MinValue;
     private IReadOnlyList<AgentDescriptor> _agents = AgentCatalog.Defaults;
@@ -59,14 +62,9 @@ public sealed class RolloutHost
         foreach (var record in Store.LoadAll())
         {
             var ledger = new MissionLedger(record.Mission.Id, record.Attempts);
-            // ⚠️ Both hooks, and the second is easy to miss because this path uses an object
-            // initialiser while CreateMission assigns them one by one. Wiring only the new-mission
-            // path gives a money cap that works until RolloutLoud is restarted and then silently
-            // does not — on exactly the long runs a spend cap exists for.
             var engine = new MissionEngine(record.Mission, ledger, Store, paths)
             {
                 ReadContextTokens = id => TokensFor(id, WhereItWorks(record.Mission)),
-                ReadSpend = BudgetFor,
             };
 
             engine.EventLogged += e => MissionEventLogged?.Invoke(e);
@@ -120,7 +118,7 @@ public sealed class RolloutHost
         return reading.HasNumber ? reading.Tokens : null;
     }
 
-    /// <summary>What a mission has spent, and whether that is past its cap.</summary>
+    /// <summary>What a mission has cost so far. A figure for the operator, never a stop condition.</summary>
     public SpendMeter Spend { get; }
 
     /// <summary>
@@ -128,15 +126,23 @@ public sealed class RolloutHost
     /// </summary>
     /// <remarks>
     /// Exposed so no caller has to remember that the meter is per-directory. The bridge asking
-    /// <c>Spend.Evaluate(mission, anchor)</c> is how the wrong session got billed to a mission in
-    /// the first place, and a helper that cannot be called wrongly beats a comment asking people
+    /// <c>Spend.Read(mission.AgentId, anchor)</c> is how the wrong session got billed to a mission
+    /// in the first place, and a helper that cannot be called wrongly beats a comment asking people
     /// not to.
+    ///
+    /// Falls back to the estimate when no transcript can be read, so an agent without a probe still
+    /// gets a figure. It is a floor and <see cref="SpendReading.Summary"/> labels it one — silence
+    /// would read as "this run cost nothing", which is the one answer that is certainly wrong.
     /// </remarks>
-    public BudgetVerdict SpendOn(Mission mission) => Spend.Evaluate(mission, WhereItWorks(mission));
+    public SpendReading SpendReading(Mission mission)
+    {
+        var where = WhereItWorks(mission);
+        var measured = Spend.Read(mission.AgentId, where, mission.StartedAt);
 
-    /// <summary>The figure alone, for the window. Same rule about where it is read.</summary>
-    public SpendReading SpendReading(Mission mission) =>
-        Spend.Read(mission.AgentId, WhereItWorks(mission), mission.StartedAt);
+        return measured.HasNumber
+            ? measured
+            : Spend.Estimate(TokensFor(mission.AgentId, where) ?? 0);
+    }
 
     /// <summary>How much each Fourth Wall mission has kept from whoever is steering it.</summary>
     public FourthWallAudit Wall { get; } = new();
@@ -144,8 +150,116 @@ public sealed class RolloutHost
     /// <summary>What each session handed over to the next. Survives a power cut.</summary>
     public SessionBrain Brain { get; }
 
+    /// <summary>The handover chain for a briefing, or null when this is the first session.</summary>
+    /// <remarks>
+    /// Null rather than "you are the first on this": in a briefing that sentence is a section about
+    /// the absence of a section, and every heading an agent reads costs it attention it could have
+    /// spent on the objective.
+    /// </remarks>
+    private string? HandoverFor(string missionId, string role) =>
+        Brain.HasAny(missionId, role) ? Brain.Narrate(missionId, role) : null;
+
     /// <summary>Which transcript belongs to which session, so a per-role ceiling reads its own.</summary>
     public SessionTrail Trail { get; }
+
+    /// <summary>Handover notes already spent on a replacement, so one ceiling swaps once.</summary>
+    private readonly Dictionary<string, DateTimeOffset> _handedOverAt = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Replaces the session holding a role with a fresh one, when its handover note is in.
+    /// </summary>
+    /// <remarks>
+    /// <b>The promise the code did not keep.</b> The ceiling prompt told the outgoing session
+    /// "RolloutLoud will open your replacement when it makes sense", and nothing opened one:
+    /// <see cref="ShouldHandOver"/> was consulted in a single place, to append that sentence to a
+    /// <c>/continue</c> response. The session stayed, the window kept growing, and the handover it
+    /// had written sat on disk.
+    ///
+    /// <b>The note is the token.</b> A swap needs a handover recorded since the last one, which is
+    /// what stops the same ceiling from firing twice — a replaced session's window reading resets,
+    /// but the degrading-progress trigger does not, and without this it would swap on every turn.
+    /// It also means the outgoing session has to have done its part before it is closed: no note,
+    /// no replacement, and the ceiling prompt keeps asking.
+    ///
+    /// ⚠️ <b>Never call this while the outgoing session is waiting on a reply.</b> Retiring the
+    /// window kills the CLI inside it, and the CLI mid-request is the one that asked. The bridge
+    /// answers first and swaps after.
+    /// </remarks>
+    public bool HandoverIsReady(Mission mission, string role) => Unspent(mission.Id, role) is not null;
+
+    /// <summary>The note this role has written and no replacement has spent yet.</summary>
+    private DateTimeOffset? Unspent(string missionId, string role)
+    {
+        if (Brain.LatestAt(missionId, role) is not { } written)
+        {
+            return null;
+        }
+
+        lock (_gate)
+        {
+            return _handedOverAt.TryGetValue(missionId + "/" + role, out var spent) && written <= spent
+                ? null
+                : written;
+        }
+    }
+
+    /// <summary>
+    /// Marks this role's handover note as used, and says whether it was there to use.
+    /// </summary>
+    /// <remarks>
+    /// Split from the launch so the once-only rule can be tested without starting a CLI. That rule
+    /// is the whole safety of the swap: without it the degrading-progress trigger, which does not
+    /// reset when a window does, would replace the session on every turn for the rest of the run.
+    /// </remarks>
+    internal bool SpendHandover(string missionId, string role)
+    {
+        if (Unspent(missionId, role) is not { } written)
+        {
+            return false;
+        }
+
+        lock (_gate)
+        {
+            _handedOverAt[missionId + "/" + role] = written;
+        }
+
+        return true;
+    }
+
+    /// <inheritdoc cref="HandoverIsReady"/>
+    public string? TryHandOver(MissionEngine mission, string role)
+    {
+        if (!SpendHandover(mission.Mission.Id, role))
+        {
+            return null;
+        }
+
+        if (string.Equals(role, SupervisorRole, StringComparison.OrdinalIgnoreCase))
+        {
+            // Retired here rather than inside WakeSupervisor, which refuses to open a second one
+            // while the first is alive — correctly, for its own trigger. This is the case where
+            // replacing it IS the point.
+            if (Sessions.Retire(SupervisorRole) is { } closed)
+            {
+                Logged?.Invoke(closed);
+            }
+
+            WakeSupervisor(mission, "its turn was up — the window reached the ceiling");
+            return "A fresh supervisor is open, with your handover in its briefing.";
+        }
+
+        if (FindAgent(mission.Mission.AgentId) is not { } agent)
+        {
+            return null;
+        }
+
+        // LaunchAgent retires the worker window and registers the new one, and the briefing it
+        // writes carries the handover this run just recorded.
+        LaunchAgent(agent, LaunchMode.Normal, mission, SessionOrigin.Watchdog);
+
+        return "A fresh session is open on this mission, with your handover in its briefing. " +
+               "This window is finished — anything more you type here is not part of the run.";
+    }
 
     /// <summary>When to replace a session with a fresh one. See <see cref="HandoverWatch"/>.</summary>
     public HandoverSettings Handover { get; set; } = new();
@@ -271,17 +385,6 @@ public sealed class RolloutHost
             }
         }
     }
-
-    /// <summary>
-    /// The money brake for one mission.
-    /// </summary>
-    /// <remarks>
-    /// The estimate handed in as a fallback is the context reading, which is what RolloutLoud knows
-    /// it sent. It is a floor and it is labelled one — but a floor that stops a run is better than
-    /// a cap that silently never fires, which is what an unmeasurable agent would otherwise get.
-    /// </remarks>
-    private BudgetVerdict BudgetFor(Mission mission) =>
-        Spend.Evaluate(mission, WhereItWorks(mission), TokensFor(mission.AgentId, WhereItWorks(mission)));
 
     /// <summary>What the last tidy found and removed. Shown in the window.</summary>
     public HousekeepingReport? LastHousekeeping { get; private set; }
@@ -505,8 +608,11 @@ public sealed class RolloutHost
             Rationale =
                 $"This mission works in {where}, which is not the folder RolloutLoud is anchored to. " +
                 $"Clicking writes the mission block into {Path.Combine(where, agent.InstructionFile)} " +
-                $"— that file only, rewritten — and opens {agent.DisplayName} there" +
-                (mode == LaunchMode.Elevated ? " with its approval prompts off." : "."),
+                $"— that file only, rewritten — and opens {agent.DisplayName} there with its " +
+                "approval prompts off" +
+                (mode == LaunchMode.Elevated
+                    ? ", in a process with administrative rights."
+                    : ", in a process with the rights RolloutLoud itself has."),
             RequestedBy = mission.Mission.AgentId,
             MissionId = mission.Mission.Id,
         });
@@ -618,7 +724,6 @@ public sealed class RolloutHost
         {
             engine = MissionEngine.Create(mission, Store, Paths);
             engine.ReadContextTokens = id => TokensFor(id, WhereItWorks(mission));
-            engine.ReadSpend = BudgetFor;
             _engines[mission.Id] = engine;
             ActiveMissionId = mission.Id;
         }
@@ -787,8 +892,28 @@ public sealed class RolloutHost
             return;
         }
 
+        // ⚠️ The brake that was missing, and its absence is what put a pile of windows on the
+        // operator's screen. Every trigger here is a symptom that stays true until somebody acts on
+        // it — an unanswered question reads as unanswered whether nobody has looked or somebody is
+        // looking right now — so a floor in minutes cannot tell "nobody is watching" from "the one
+        // watching has not finished". Only asking whether one is open can.
+        if (Sessions.IsLive(SupervisorRole))
+        {
+            Logged?.Invoke(
+                $"A supervisor is already open for {mission.Mission.Id}; not opening a second one. " +
+                "It will be replaced when its turn is up, not stacked on.");
+            return;
+        }
+
         var mayAnswer = Deputies.For(mission.Mission.Id) is not null;
-        var briefing = Offload.BriefingComposer.ForSupervisor(mission.Mission, mayAnswer, reason);
+        // ⚠️ Read back, which for a long time nothing did. Brain.Record had one caller and
+        // Brain.Chain had none outside its tests: every session wrote what it had come to believe
+        // into .rolloutloud/ and no successor ever saw a word of it.
+        var briefing = Offload.BriefingComposer.ForSupervisor(
+            mission.Mission,
+            mayAnswer,
+            reason,
+            HandoverFor(mission.Mission.Id, SupervisorRole));
 
         WriteBriefingSection(Path.Combine(Paths.RepositoryRoot, agent.InstructionFile), briefing);
 
@@ -800,8 +925,14 @@ public sealed class RolloutHost
 
         LastSupervisorWake = DateTimeOffset.UtcNow;
 
-        ProcessLauncher.Launch(new LaunchRequest
+        if (Sessions.Retire(SupervisorRole) is { } retired)
         {
+            Logged?.Invoke(retired);
+        }
+
+        var process = ProcessLauncher.Launch(new LaunchRequest
+        {
+            WindowTitle = "RolloutLoud supervisor",
             Executable = agent.Executable,
             Arguments = agent.ArgumentsFor(
                 LaunchMode.Normal,
@@ -816,9 +947,11 @@ public sealed class RolloutHost
                 ["ROLLOUTLOUD_TOKEN"] = BridgeToken ?? string.Empty,
                 ["ROLLOUTLOUD_HANDSHAKE"] = Paths.BridgeHandshakeFile,
                 ["ROLLOUTLOUD_MISSION"] = mission.Mission.Id,
-                ["ROLLOUTLOUD_ROLE"] = "supervisor",
+                ["ROLLOUTLOUD_ROLE"] = SupervisorRole,
             },
         });
+
+        Sessions.Register(SupervisorRole, process, SessionOrigin.Watchdog);
     }
 
     /// <summary>
@@ -869,7 +1002,11 @@ public sealed class RolloutHost
     /// rewritten on every launch instead of appended to: a stale mission left in CLAUDE.md is an
     /// agent quietly working last week's objective.
     /// </remarks>
-    public void LaunchAgent(AgentDescriptor agent, LaunchMode mode, MissionEngine? mission)
+    public void LaunchAgent(
+        AgentDescriptor agent,
+        LaunchMode mode,
+        MissionEngine? mission,
+        SessionOrigin origin = SessionOrigin.Operator)
     {
         // Where the agent works, which is the anchor unless the mission says otherwise. The
         // briefing and the process both follow it: writing the mission block here and starting the
@@ -881,7 +1018,11 @@ public sealed class RolloutHost
 
         if (mission is not null)
         {
-            var briefing = Offload.BriefingComposer.ForMainSession(mission.Mission, mission.Ledger, HasAttachedIdentity);
+            var briefing = Offload.BriefingComposer.ForMainSession(
+                mission.Mission,
+                mission.Ledger,
+                HasAttachedIdentity,
+                HandoverFor(mission.Mission.Id, WorkerRole));
             var target = Path.Combine(workingDirectory, agent.InstructionFile);
             WriteBriefingSection(target, briefing);
 
@@ -899,8 +1040,17 @@ public sealed class RolloutHost
             Context.RecordSent(agent.Id, briefing);
         }
 
-        ProcessLauncher.Launch(new LaunchRequest
+        // One worker window at a time. A replaced session that stays on screen is not harmless:
+        // it still holds the mission block it was launched with, and an operator who types into
+        // the wrong one is talking to a session RolloutLoud has stopped counting on.
+        if (Sessions.Retire(WorkerRole) is { } retired)
         {
+            Logged?.Invoke(retired);
+        }
+
+        var process = ProcessLauncher.Launch(new LaunchRequest
+        {
+            WindowTitle = "RolloutLoud worker - " + agent.DisplayName,
             Executable = agent.Executable,
             Arguments = agent.ArgumentsFor(mode, Opening(agent, mission)),
             WorkingDirectory = workingDirectory,
@@ -922,8 +1072,11 @@ public sealed class RolloutHost
                 ["ROLLOUTLOUD_HANDSHAKE"] = Paths.BridgeHandshakeFile,
                 ["ROLLOUTLOUD_MISSION"] = mission?.Mission.Id ?? string.Empty,
                 ["ROLLOUTLOUD_AGENT"] = agent.Id,
+                ["ROLLOUTLOUD_ROLE"] = WorkerRole,
             },
         });
+
+        Sessions.Register(WorkerRole, process, origin);
     }
 
     /// <summary>

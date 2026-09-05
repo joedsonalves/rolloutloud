@@ -160,6 +160,41 @@ invokes itself. One consent, recorded, at a moment you chose.
 > and the difference only shows up an hour later when a privileged command fails. That is why the
 > warning has three answers, not two: elevate and restart, launch anyway, or cancel.
 
+### Approval prompts are off in every session RolloutLoud opens
+
+Both buttons, the supervisor it wakes on its own, and every headless round — supervised or
+subagent — carry the CLI's own bypass flag. The two buttons differ in **OS rights**, not in
+prompting.
+
+That is not a shortcut, it is what the tool is. A session RolloutLoud opens is one you are not
+sitting in front of; a CLI that stops to ask permission in a window nobody is watching does
+nothing until somebody comes back, and on a headless round it burns the whole timeout and returns
+empty — which reads exactly like an agent that had nothing to say. The consent is opening
+RolloutLoud, once, and it is recorded.
+
+The flags live in `.rolloutloud/agents.json` and are yours to edit, including out. OpenClaw has
+none: its permission is persisted host state (`openclaw approvals`, `openclaw exec-policy`), set
+once by hand.
+
+---
+
+## One CLI window per role
+
+RolloutLoud keeps a single window for the **worker** and a single one for the **supervisor**.
+Opening a new one for a role retires the previous one.
+
+What decides whether the old window is closed is **who opened it**. One RolloutLoud opened on its
+own — a woken supervisor, a turn handover — is closed. One *you* opened by clicking a button is
+left standing and simply told it has been replaced, because a tool that kills the terminal under
+your hands mid-sentence has done something worse than leaving a window around. Either way the role
+passes to the new session.
+
+> ⚠️ **This is why the supervisor wake-up asks whether one is already open.** Its triggers are
+> symptoms — "a question has been open for ten minutes with nobody answering" — and a symptom stays
+> true until somebody acts on it. A supervisor that *could not* answer kept the trigger true, and
+> the fifteen-minute floor between wakes cannot tell "nobody is watching" from "the one watching
+> has not finished". That is how an afternoon produced a screen full of terminals.
+
 ---
 
 ## Fluid buttons
@@ -278,7 +313,7 @@ rollout install [--no-open]      build and open, anchored here
 rollout open [--elevated]
 rollout status
 
-rollout mission "<objective>" --gate "<command>" --scope a,b --auth "<who authorised it>"  [--max-spend USD]
+rollout mission "<objective>" --gate "<command>" --scope a,b --auth "<who authorised it>"
                                            [--fourth-wall] [--deliverable <path>]
 rollout propose "<objective>" --gate "<command>" --why "<reasoning>"   you approve it before it runs
 rollout briefing ["<subagent task>"]
@@ -451,30 +486,26 @@ pending, since nothing is running it any more.
 **A finished mission is not resumable.** Achieved, exhausted or aborted, it is refused — quietly
 restarting one would undo a decision somebody made, including the gate's.
 
-## Stopping on money, not just on time
+## Knowing what a run cost
 
-`--max-attempts` counts moves and `--max-hours` counts minutes. Neither notices that a six-hour run
-with offload on can make a hundred cheap attempts or twenty expensive ones, and only one of those
-is a bill you would have agreed to in advance.
+There is no spend cap and no wall clock. `--max-attempts` is the only stop condition, and it counts
+the thing a mission is actually made of — moves. A run that a clock ended at hour six, or that a
+figure ended at $25, was stopped by a measure the work had nothing to do with, and the only move
+available was to raise the number and resume.
 
-```
-rollout mission "make the integration suite pass on Windows" \
-        --gate "dotnet test tests/Integration -c Release" \
-        --max-spend 25
-```
+What is left is the reading, which is what you wanted from it anyway:
 
 ```
 rollout spend
 ```
 
 ```json
-{ "usd": 0.56, "source": "measured", "capUsd": 25, "remainingUsd": 24.44,
+{ "usd": 0.56, "source": "measured",
   "byModel": [ { "model": "claude-opus-5", "usd": 0.56,
                  "outputTokens": 504, "cacheReadTokens": 341359 } ] }
 ```
 
-Reaching the cap ends the mission as `Exhausted` — the budget working, not the agent failing. Raise
-it and `rollout resume` if the work turned out to be worth more.
+Ask it when you are choosing between a cheap experiment and an expensive one. It never ends a run.
 
 ### Where the number comes from
 
@@ -485,17 +516,11 @@ window, because it was charged for.
 
 The four rates are kept apart on purpose. A long cached run is mostly cache reads, which are around
 a tenth of the input price; pricing them as input would overstate the bill by close to an order of
-magnitude, and a $50 cap would fire at $5 of real spend.
+magnitude.
 
 **Estimated**, from what RolloutLoud itself sent, when nothing can be read. It is a floor — it
 cannot see what the agent read on its own — and it is labelled an estimate everywhere it appears.
-
-⚠️ **The cap fires on either, and that is deliberate.** The offload threshold takes the opposite
-line and does nothing without a real reading, because acting on a guess there makes every action
-worse for the rest of the session. Money is not symmetric: failing open spends real money that
-cannot be got back, while failing closed costs one `rollout resume`. So the stop reason says which
-kind of number stopped you, and if the estimate looks high, raise the cap rather than distrusting
-the brake.
+The alternative was showing nothing, which reads as "this run was free".
 
 ### Prices age, so they live in a file
 
@@ -507,8 +532,12 @@ A model with **no** entry is priced at nothing rather than at a guess, and its t
 separately — `"unpricedTokens"` — so a bill never quietly leaves something out of a number you are
 trusting.
 
-Only Claude Code has a transcript RolloutLoud can read. The other three fall back to the estimate;
-adding a probe and adding a price for one of them is a single job, not two.
+Only Claude Code and Codex have a transcript RolloutLoud can read. The other two fall back to the
+estimate; adding a probe and adding a price for one of them is a single job, not two.
+
+⚠️ **The window ceiling is a different thing and it stays.** A session past 200,000 tokens is handed
+over to a fresh one — see *Knowing when the window got expensive*. That is a handover, not a stop:
+the mission carries on in a new session with its briefing.
 
 ---
 
@@ -567,6 +596,33 @@ started, which is what `always` is for and not what the operator asked for.
 > is not a published contract and can change without notice. Every failure returns nothing, so the
 > meter falls back to estimating rather than breaking, and a reading claims to be measured only
 > when it genuinely is.
+
+### The turn handover
+
+Past 200,000 tokens a session is replaced rather than carried on. Every turn from there re-reads
+the whole window, and a fresh session with the briefing, the ledger and a handover note costs a
+fraction of that.
+
+It happens in two turns, and the order is the point:
+
+1. **At the ceiling**, `/continue` asks the outgoing session for its note —
+   `rollout handover "<what you came to believe>" --dropped "<assumptions you stopped trusting>"
+   --next "<the most promising thing you had not got to>"`. Asked *while it can still think*: a
+   handover written by a session that has run out is the transcript it was meant to replace.
+2. **On the next turn**, once the note is in, RolloutLoud answers `handingOver: true`, opens the
+   replacement, and closes the old window.
+
+> ⚠️ **No note, no replacement.** The swap spends the handover, and spends each one once. That is
+> what stops it firing twice on one ceiling — a replaced session's window reading resets, but the
+> cost-per-finding trigger is computed from a ledger the new session inherits — and it is what
+> stops a window being closed before it has said what it learned.
+
+The three fields are the ones the ledger cannot carry. What was *tried* is already recorded; what
+the session came to *believe* and which of its own assumptions it dropped exist only in its head.
+The next session reads them fenced as untrusted text, like anything else an agent wrote.
+
+Worker and supervisor have separate chains, and they do not cross. A worker reading its own
+supervisor's assessment of it is being handed the critique it was going to be measured against.
 
 ## Handing a stuck mission to a different CLI
 
