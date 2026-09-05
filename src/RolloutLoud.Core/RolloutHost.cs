@@ -162,6 +162,105 @@ public sealed class RolloutHost
     /// <summary>Which transcript belongs to which session, so a per-role ceiling reads its own.</summary>
     public SessionTrail Trail { get; }
 
+    /// <summary>Handover notes already spent on a replacement, so one ceiling swaps once.</summary>
+    private readonly Dictionary<string, DateTimeOffset> _handedOverAt = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Replaces the session holding a role with a fresh one, when its handover note is in.
+    /// </summary>
+    /// <remarks>
+    /// <b>The promise the code did not keep.</b> The ceiling prompt told the outgoing session
+    /// "RolloutLoud will open your replacement when it makes sense", and nothing opened one:
+    /// <see cref="ShouldHandOver"/> was consulted in a single place, to append that sentence to a
+    /// <c>/continue</c> response. The session stayed, the window kept growing, and the handover it
+    /// had written sat on disk.
+    ///
+    /// <b>The note is the token.</b> A swap needs a handover recorded since the last one, which is
+    /// what stops the same ceiling from firing twice — a replaced session's window reading resets,
+    /// but the degrading-progress trigger does not, and without this it would swap on every turn.
+    /// It also means the outgoing session has to have done its part before it is closed: no note,
+    /// no replacement, and the ceiling prompt keeps asking.
+    ///
+    /// ⚠️ <b>Never call this while the outgoing session is waiting on a reply.</b> Retiring the
+    /// window kills the CLI inside it, and the CLI mid-request is the one that asked. The bridge
+    /// answers first and swaps after.
+    /// </remarks>
+    public bool HandoverIsReady(Mission mission, string role) => Unspent(mission.Id, role) is not null;
+
+    /// <summary>The note this role has written and no replacement has spent yet.</summary>
+    private DateTimeOffset? Unspent(string missionId, string role)
+    {
+        if (Brain.LatestAt(missionId, role) is not { } written)
+        {
+            return null;
+        }
+
+        lock (_gate)
+        {
+            return _handedOverAt.TryGetValue(missionId + "/" + role, out var spent) && written <= spent
+                ? null
+                : written;
+        }
+    }
+
+    /// <summary>
+    /// Marks this role's handover note as used, and says whether it was there to use.
+    /// </summary>
+    /// <remarks>
+    /// Split from the launch so the once-only rule can be tested without starting a CLI. That rule
+    /// is the whole safety of the swap: without it the degrading-progress trigger, which does not
+    /// reset when a window does, would replace the session on every turn for the rest of the run.
+    /// </remarks>
+    internal bool SpendHandover(string missionId, string role)
+    {
+        if (Unspent(missionId, role) is not { } written)
+        {
+            return false;
+        }
+
+        lock (_gate)
+        {
+            _handedOverAt[missionId + "/" + role] = written;
+        }
+
+        return true;
+    }
+
+    /// <inheritdoc cref="HandoverIsReady"/>
+    public string? TryHandOver(MissionEngine mission, string role)
+    {
+        if (!SpendHandover(mission.Mission.Id, role))
+        {
+            return null;
+        }
+
+        if (string.Equals(role, SupervisorRole, StringComparison.OrdinalIgnoreCase))
+        {
+            // Retired here rather than inside WakeSupervisor, which refuses to open a second one
+            // while the first is alive — correctly, for its own trigger. This is the case where
+            // replacing it IS the point.
+            if (Sessions.Retire(SupervisorRole) is { } closed)
+            {
+                Logged?.Invoke(closed);
+            }
+
+            WakeSupervisor(mission, "its turn was up — the window reached the ceiling");
+            return "A fresh supervisor is open, with your handover in its briefing.";
+        }
+
+        if (FindAgent(mission.Mission.AgentId) is not { } agent)
+        {
+            return null;
+        }
+
+        // LaunchAgent retires the worker window and registers the new one, and the briefing it
+        // writes carries the handover this run just recorded.
+        LaunchAgent(agent, LaunchMode.Normal, mission, SessionOrigin.Watchdog);
+
+        return "A fresh session is open on this mission, with your handover in its briefing. " +
+               "This window is finished — anything more you type here is not part of the run.";
+    }
+
     /// <summary>When to replace a session with a fresh one. See <see cref="HandoverWatch"/>.</summary>
     public HandoverSettings Handover { get; set; } = new();
 

@@ -119,6 +119,19 @@ public sealed class SessionBrain
     public bool HasAny(string missionId, string role) =>
         Chain(missionId).Any(h => string.Equals(h.Role, role, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>When the most recent handover for this role was written, or null if there is none.</summary>
+    /// <remarks>
+    /// This is the token the turn handover spends. A session is replaced only when a note exists
+    /// that no replacement has used yet, which is what keeps the swap from firing twice on the same
+    /// ceiling — the outgoing session has to have done its part before it is closed.
+    /// </remarks>
+    public DateTimeOffset? LatestAt(string missionId, string role) =>
+        Chain(missionId)
+            .Where(h => string.Equals(h.Role, role, StringComparison.OrdinalIgnoreCase))
+            .Select(h => (DateTimeOffset?)h.At)
+            .DefaultIfEmpty(null)
+            .Max();
+
     /// <summary>
     /// The chain as a fresh session should read it, newest last.
     /// </summary>

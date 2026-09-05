@@ -380,6 +380,20 @@ instruction too.
 `unknown` means too few settled attempts to say anything honest. It is not a hint that things are
 fine.
 
+#### `handingOver: true` — this is your last turn
+
+The directive tells you first, but the field is there for a client that reads structure rather than
+prose. It means your handover note is recorded and RolloutLoud is opening your replacement **as
+soon as it has answered this call**. Stop; do not start another attempt.
+
+The turn before, `handingOver` is absent and the directive asks for the note instead:
+`rollout handover "<what you came to believe>" --dropped "..." --next "..."`. Write it while you can
+still think clearly, which is why the ask comes at the ceiling rather than at the wall.
+
+⚠️ **No note, no replacement.** The swap spends the handover you wrote, and it spends each one
+once. A session that never writes one is never closed — the ceiling prompt just keeps asking, and
+the window keeps costing what it costs.
+
 ### `POST /v1/missions/active/gate` — ask the gate
 
 The only thing that can end a mission as achieved. Runs the gate, and — when it passes — runs it

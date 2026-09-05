@@ -902,6 +902,13 @@ public sealed class BridgeServer : IAsyncDisposable
         // and a handover written by an exhausted session is the transcript it was meant to replace.
         var handover = _host.ShouldHandOver(engine.Mission, RolloutHost.WorkerRole);
 
+        // Whether this is the turn the session is actually replaced on, which needs a handover note
+        // it has written and no swap has used yet. Decided before the response so the directive can
+        // say which of the two it is — "write your handover" and "you are being replaced now" are
+        // different instructions, and telling an agent the first when the second is true wastes its
+        // last turn.
+        var swapping = handover.HandOver && _host.HandoverIsReady(engine.Mission, RolloutHost.WorkerRole);
+
         await WriteAsync(context, HttpStatusCode.OK, new
         {
             @continue = decision.Continue,
@@ -911,7 +918,8 @@ public sealed class BridgeServer : IAsyncDisposable
                     .Concat(answers.Select(a => a.ForAgent()))
                     .Concat(reviews.Select(r => r.ForAgent()))
                     .Concat(handover.HandOver
-                        ? [$"⚠️ {handover.Detail}.{Environment.NewLine}{Environment.NewLine}{HandoverWatch.HandoverPrompt}"]
+                        ? [$"⚠️ {handover.Detail}.{Environment.NewLine}{Environment.NewLine}" +
+                           (swapping ? HandoverWatch.ReplacedPrompt : HandoverWatch.HandoverPrompt)]
                         : Array.Empty<string>())),
             state = engine.Mission.State.ToString(),
             tier = engine.Mission.EscalationTier,
@@ -934,7 +942,17 @@ public sealed class BridgeServer : IAsyncDisposable
                 blocking = r.Blocking,
                 at = r.At,
             }),
+            handingOver = swapping,
         }).ConfigureAwait(false);
+
+        // ⚠️ After the response, never before. Replacing the worker retires its window, and killing
+        // that window kills the CLI inside it — which is the CLI waiting on this very reply. Swap
+        // first and the caller dies mid-request, sees a dropped connection, and the last thing the
+        // run records is a network error rather than a handover.
+        if (swapping && _host.TryHandOver(engine, RolloutHost.WorkerRole) is { } said)
+        {
+            Logged?.Invoke(said);
+        }
     }
 
     /// <summary>

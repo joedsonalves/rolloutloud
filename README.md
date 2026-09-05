@@ -597,6 +597,33 @@ started, which is what `always` is for and not what the operator asked for.
 > meter falls back to estimating rather than breaking, and a reading claims to be measured only
 > when it genuinely is.
 
+### The turn handover
+
+Past 200,000 tokens a session is replaced rather than carried on. Every turn from there re-reads
+the whole window, and a fresh session with the briefing, the ledger and a handover note costs a
+fraction of that.
+
+It happens in two turns, and the order is the point:
+
+1. **At the ceiling**, `/continue` asks the outgoing session for its note —
+   `rollout handover "<what you came to believe>" --dropped "<assumptions you stopped trusting>"
+   --next "<the most promising thing you had not got to>"`. Asked *while it can still think*: a
+   handover written by a session that has run out is the transcript it was meant to replace.
+2. **On the next turn**, once the note is in, RolloutLoud answers `handingOver: true`, opens the
+   replacement, and closes the old window.
+
+> ⚠️ **No note, no replacement.** The swap spends the handover, and spends each one once. That is
+> what stops it firing twice on one ceiling — a replaced session's window reading resets, but the
+> cost-per-finding trigger is computed from a ledger the new session inherits — and it is what
+> stops a window being closed before it has said what it learned.
+
+The three fields are the ones the ledger cannot carry. What was *tried* is already recorded; what
+the session came to *believe* and which of its own assumptions it dropped exist only in its head.
+The next session reads them fenced as untrusted text, like anything else an agent wrote.
+
+Worker and supervisor have separate chains, and they do not cross. A worker reading its own
+supervisor's assessment of it is being handed the critique it was going to be measured against.
+
 ## Handing a stuck mission to a different CLI
 
 Tier 3 of the escalation ladder, and the rung with the best return: the same objective and the
