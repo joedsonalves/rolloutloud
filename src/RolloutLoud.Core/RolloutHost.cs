@@ -28,6 +28,9 @@ public sealed class RolloutHost
     private readonly Dictionary<string, MissionEngine> _engines = new(StringComparer.Ordinal);
     private readonly Dictionary<string, FluidButton> _buttons = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MissionProposal> _proposals = new(StringComparer.Ordinal);
+
+    /// <summary>One CLI window per role, and the handle that can close it.</summary>
+    public OpenSessions Sessions { get; } = new();
     private ButtonAllowlist _allowlist = ButtonAllowlist.Empty;
     private DateTime _allowlistStamp = DateTime.MinValue;
     private IReadOnlyList<AgentDescriptor> _agents = AgentCatalog.Defaults;
@@ -781,6 +784,19 @@ public sealed class RolloutHost
             return;
         }
 
+        // ⚠️ The brake that was missing, and its absence is what put a pile of windows on the
+        // operator's screen. Every trigger here is a symptom that stays true until somebody acts on
+        // it — an unanswered question reads as unanswered whether nobody has looked or somebody is
+        // looking right now — so a floor in minutes cannot tell "nobody is watching" from "the one
+        // watching has not finished". Only asking whether one is open can.
+        if (Sessions.IsLive(SupervisorRole))
+        {
+            Logged?.Invoke(
+                $"A supervisor is already open for {mission.Mission.Id}; not opening a second one. " +
+                "It will be replaced when its turn is up, not stacked on.");
+            return;
+        }
+
         var mayAnswer = Deputies.For(mission.Mission.Id) is not null;
         var briefing = Offload.BriefingComposer.ForSupervisor(mission.Mission, mayAnswer, reason);
 
@@ -794,8 +810,14 @@ public sealed class RolloutHost
 
         LastSupervisorWake = DateTimeOffset.UtcNow;
 
-        ProcessLauncher.Launch(new LaunchRequest
+        if (Sessions.Retire(SupervisorRole) is { } retired)
         {
+            Logged?.Invoke(retired);
+        }
+
+        var process = ProcessLauncher.Launch(new LaunchRequest
+        {
+            WindowTitle = "RolloutLoud supervisor",
             Executable = agent.Executable,
             Arguments = agent.ArgumentsFor(
                 LaunchMode.Normal,
@@ -810,9 +832,11 @@ public sealed class RolloutHost
                 ["ROLLOUTLOUD_TOKEN"] = BridgeToken ?? string.Empty,
                 ["ROLLOUTLOUD_HANDSHAKE"] = Paths.BridgeHandshakeFile,
                 ["ROLLOUTLOUD_MISSION"] = mission.Mission.Id,
-                ["ROLLOUTLOUD_ROLE"] = "supervisor",
+                ["ROLLOUTLOUD_ROLE"] = SupervisorRole,
             },
         });
+
+        Sessions.Register(SupervisorRole, process, SessionOrigin.Watchdog);
     }
 
     /// <summary>
@@ -863,7 +887,11 @@ public sealed class RolloutHost
     /// rewritten on every launch instead of appended to: a stale mission left in CLAUDE.md is an
     /// agent quietly working last week's objective.
     /// </remarks>
-    public void LaunchAgent(AgentDescriptor agent, LaunchMode mode, MissionEngine? mission)
+    public void LaunchAgent(
+        AgentDescriptor agent,
+        LaunchMode mode,
+        MissionEngine? mission,
+        SessionOrigin origin = SessionOrigin.Operator)
     {
         // Where the agent works, which is the anchor unless the mission says otherwise. The
         // briefing and the process both follow it: writing the mission block here and starting the
@@ -893,8 +921,17 @@ public sealed class RolloutHost
             Context.RecordSent(agent.Id, briefing);
         }
 
-        ProcessLauncher.Launch(new LaunchRequest
+        // One worker window at a time. A replaced session that stays on screen is not harmless:
+        // it still holds the mission block it was launched with, and an operator who types into
+        // the wrong one is talking to a session RolloutLoud has stopped counting on.
+        if (Sessions.Retire(WorkerRole) is { } retired)
         {
+            Logged?.Invoke(retired);
+        }
+
+        var process = ProcessLauncher.Launch(new LaunchRequest
+        {
+            WindowTitle = "RolloutLoud worker - " + agent.DisplayName,
             Executable = agent.Executable,
             Arguments = agent.ArgumentsFor(mode, Opening(agent, mission)),
             WorkingDirectory = workingDirectory,
@@ -916,8 +953,11 @@ public sealed class RolloutHost
                 ["ROLLOUTLOUD_HANDSHAKE"] = Paths.BridgeHandshakeFile,
                 ["ROLLOUTLOUD_MISSION"] = mission?.Mission.Id ?? string.Empty,
                 ["ROLLOUTLOUD_AGENT"] = agent.Id,
+                ["ROLLOUTLOUD_ROLE"] = WorkerRole,
             },
         });
+
+        Sessions.Register(WorkerRole, process, origin);
     }
 
     /// <summary>

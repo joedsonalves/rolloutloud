@@ -35,8 +35,9 @@ public class SupervisorWatchTests
     private static WakeDecision Assess(
         Mission mission,
         DateTimeOffset? lastWoken = null,
-        DateTimeOffset? written = null) =>
-        SupervisorWatch.Assess(mission, new WakeSettings(), Now, lastWoken, written);
+        DateTimeOffset? written = null,
+        bool oneIsAlreadyOpen = false) =>
+        SupervisorWatch.Assess(mission, new WakeSettings(), Now, lastWoken, written, oneIsAlreadyOpen);
 
     // ---- the trigger is a fact, not a mood ----------------------------------------------------
 
@@ -196,5 +197,43 @@ public class SupervisorWatchTests
             "a question has been open",
             BriefingComposer.ForSupervisor(Running(), true, "a question has been open for 15 minutes"),
             StringComparison.Ordinal);
+    }
+
+    // ---- one supervisor, not a screen full of them --------------------------------------------
+
+    [Fact]
+    public void A_supervisor_already_on_screen_stops_a_second_one()
+    {
+        // ⚠️ The regression this pair exists for. Every trigger here is a symptom, and a symptom
+        // stays true until somebody acts on it: a question reads as unanswered whether nobody has
+        // looked at it or somebody is reading it this second. A supervisor that could not answer —
+        // out of allowance, or launched with no permission to write — kept this true and earned a
+        // fresh window every fifteen minutes for an afternoon.
+        var mission = Running(Open(minutesAgo: 240));
+
+        Assert.True(Assess(mission).Wake);
+        Assert.False(Assess(mission, oneIsAlreadyOpen: true).Wake);
+    }
+
+    [Fact]
+    public void A_supervisor_that_closed_lets_the_next_one_through()
+    {
+        // The opposite failure, and it is the one a liveness check invites: a role held for ever by
+        // a window that is gone leaves the run with nobody watching and no way to notice.
+        var mission = Running(Open(minutesAgo: 240));
+
+        Assert.True(Assess(mission, oneIsAlreadyOpen: false).Wake);
+    }
+
+    [Fact]
+    public void The_floor_still_applies_when_none_is_open()
+    {
+        // Both brakes, and they answer different questions. A supervisor that looked, found nothing
+        // to add and closed leaves every trigger exactly as it found them — the clock is what stops
+        // that from reopening one immediately.
+        var mission = Running(Open(minutesAgo: 240));
+
+        Assert.False(Assess(mission, lastWoken: Now.AddMinutes(-2)).Wake);
+        Assert.True(Assess(mission, lastWoken: Now.AddMinutes(-20)).Wake);
     }
 }

@@ -26,10 +26,12 @@ public class LaunchCommandLineTests
             InTerminal = true,
         });
 
-        return new ProcessStartInfoView(info.FileName, info.Arguments, info.ArgumentList.Count);
+        return new ProcessStartInfoView(
+            info.FileName, info.Arguments, info.ArgumentList.Count, info.WorkingDirectory);
     }
 
-    private readonly record struct ProcessStartInfoView(string FileName, string Arguments, int ListCount);
+    private readonly record struct ProcessStartInfoView(
+        string FileName, string Arguments, int ListCount, string WorkingDirectory);
 
     [Fact]
     public void The_windows_launch_uses_a_verbatim_command_line_not_an_argument_list()
@@ -58,27 +60,79 @@ public class LaunchCommandLineTests
             return;
         }
 
-        var arguments = Build(Spaced).Arguments;
+        var built = Build(Spaced);
 
-        // The whole path, inside real quotes, with no backslash in front of either of them.
-        Assert.Contains($"/D \"{Spaced}\"", arguments, StringComparison.Ordinal);
+        // It travels as a field now instead of as `start /D "<path>"`, which is the argument whose
+        // quoting broke. Verbatim, spaces and all — nothing quotes or escapes it on the way.
+        Assert.Equal(Spaced, built.WorkingDirectory);
 
-        // The exact shape of the bug, named so a future rewrite that reintroduces it fails here.
-        Assert.DoesNotContain("\\\"", arguments, StringComparison.Ordinal);
+        // The exact shape of the old bug, named so a future rewrite that reintroduces it fails
+        // here: ArgumentList escaping rewrites every quote with a backslash cmd cannot read.
+        Assert.DoesNotContain("\\\"", built.Arguments, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void The_window_still_gets_a_title_so_start_does_not_eat_the_command()
+    public void The_window_is_this_process_rather_than_a_grandchild_of_it()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             return;
         }
 
-        // Leaving the title out makes `start` take the first quoted token as the window title
-        // instead of running it — a silent no-op that looks like the button did nothing. Already
-        // known, and worth pinning next to the quoting rule it interacts with.
-        Assert.Contains("start \"RolloutLoud\"", Build(Spaced).Arguments, StringComparison.Ordinal);
+        // ⚠️ The regression guard for the whole reason `start` was dropped. `cmd /c start ... cmd
+        // /k <cli>` returns a process that exits the instant the window exists, so the window is a
+        // GRANDCHILD and the handle RolloutLoud keeps can never close it. That is what left a
+        // supervisor window on screen every fifteen minutes for an afternoon.
+        //
+        // `cmd /k` launched directly IS the window, and Kill(entireProcessTree: true) reaches it.
+        var arguments = Build(Spaced).Arguments;
+
+        Assert.StartsWith("/k ", arguments, StringComparison.Ordinal);
+        Assert.DoesNotContain("start ", arguments, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_window_gets_a_title_so_two_of_them_can_be_told_apart()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var info = ProcessLauncher.BuildTerminalStartInfo(new LaunchRequest
+        {
+            Executable = "claude",
+            WorkingDirectory = Spaced,
+            InTerminal = true,
+            WindowTitle = "RolloutLoud supervisor",
+        });
+
+        Assert.Contains("title RolloutLoud supervisor & ", info.Arguments, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_title_cannot_smuggle_anything_into_the_command_line()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        // The title is the one part of this line that could ever carry text from outside — a role
+        // today, a mission objective the day somebody finds that useful. cmd has no escaping worth
+        // trusting, so it is stripped to letters, digits, spaces and dashes rather than quoted.
+        var info = ProcessLauncher.BuildTerminalStartInfo(new LaunchRequest
+        {
+            Executable = "claude",
+            WorkingDirectory = Spaced,
+            InTerminal = true,
+            WindowTitle = "pwned & del /q /s | echo hi",
+        });
+
+        Assert.StartsWith("/k title pwned", info.Arguments, StringComparison.Ordinal);
+        Assert.DoesNotContain("&&", info.Arguments, StringComparison.Ordinal);
+        Assert.DoesNotContain("del /q", info.Arguments, StringComparison.Ordinal);
+        Assert.DoesNotContain("|", info.Arguments, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -105,7 +159,7 @@ public class LaunchCommandLineTests
 
         // The bug only showed with a space, which is exactly why it lasted. One code path for both
         // means the case that works cannot drift away from the case that did not.
-        Assert.Contains(@"/D ""C:\src\repo""", Build(@"C:\src\repo").Arguments, StringComparison.Ordinal);
+        Assert.Equal(@"C:\src\repo", Build(@"C:\src\repo").WorkingDirectory);
     }
 
     [Fact]

@@ -24,10 +24,13 @@ public sealed record WakeSettings
 
     /// <summary>Never open two supervisors within this of each other, whatever the triggers say.</summary>
     /// <remarks>
-    /// The money brake for this loop, and it is not optional. Every trigger here can stay true after
-    /// a supervisor has looked and decided there was nothing to add — an unanswered question the
-    /// supervisor deliberately left open still reads as unanswered — so without a floor the wake-up
-    /// would spawn a session a minute for the rest of the run.
+    /// The floor for this loop, and it is not optional — but it is the second line, not the first.
+    /// A supervisor that looked, decided there was nothing to add and closed leaves every trigger
+    /// exactly as it found them, and this is what stops that from reopening one immediately.
+    ///
+    /// ⚠️ It cannot do the other job, and for a long time it was asked to. A supervisor still on
+    /// screen keeps its triggers true too, and no length of floor distinguishes that from nobody
+    /// watching. That question is answered by whether a session is open, not by a clock.
     /// </remarks>
     public TimeSpan NotMoreOftenThan { get; init; } = TimeSpan.FromMinutes(15);
 }
@@ -70,15 +73,27 @@ public static class SupervisorWatch
         WakeSettings settings,
         DateTimeOffset now,
         DateTimeOffset? lastWoken,
-        DateTimeOffset? deliverableWrittenAt)
+        DateTimeOffset? deliverableWrittenAt,
+        bool oneIsAlreadyOpen = false)
     {
         if (mission.IsTerminal || mission.State != MissionState.Running)
         {
             return WakeDecision.No;
         }
 
-        // The floor comes first, so a trigger that stays true after a supervisor has already looked
-        // cannot spawn a session a minute for the rest of the run.
+        // ⚠️ First, and it is the check that was missing. Every trigger below is a SYMPTOM, and a
+        // symptom stays true until somebody acts on it — a question reads as unanswered whether
+        // nobody has looked at it or somebody is reading it right now. So the floor in minutes
+        // could never tell "nobody is watching" from "the one watching has not finished", and a
+        // supervisor that could not answer — out of allowance, or launched without permission to
+        // write — kept the trigger true and got a new window every fifteen minutes all afternoon.
+        if (oneIsAlreadyOpen)
+        {
+            return WakeDecision.No;
+        }
+
+        // The floor second. It still earns its place: a supervisor that looked, decided there was
+        // nothing to add and closed leaves every trigger exactly as it found them.
         if (lastWoken is { } last && now - last < settings.NotMoreOftenThan)
         {
             return WakeDecision.No;

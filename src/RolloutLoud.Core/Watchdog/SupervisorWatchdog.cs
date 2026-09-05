@@ -105,7 +105,8 @@ public sealed class SupervisorWatchdog : IAsyncDisposable
                     Settings,
                     DateTimeOffset.UtcNow,
                     _host.LastSupervisorWake,
-                    DeliverableWrittenAt(engine.Mission));
+                    DeliverableWrittenAt(engine.Mission),
+                    _host.Sessions.IsLive(RolloutHost.SupervisorRole));
 
                 if (decision.Wake)
                 {

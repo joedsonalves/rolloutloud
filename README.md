@@ -178,6 +178,25 @@ once by hand.
 
 ---
 
+## One CLI window per role
+
+RolloutLoud keeps a single window for the **worker** and a single one for the **supervisor**.
+Opening a new one for a role retires the previous one.
+
+What decides whether the old window is closed is **who opened it**. One RolloutLoud opened on its
+own — a woken supervisor, a turn handover — is closed. One *you* opened by clicking a button is
+left standing and simply told it has been replaced, because a tool that kills the terminal under
+your hands mid-sentence has done something worse than leaving a window around. Either way the role
+passes to the new session.
+
+> ⚠️ **This is why the supervisor wake-up asks whether one is already open.** Its triggers are
+> symptoms — "a question has been open for ten minutes with nobody answering" — and a symptom stays
+> true until somebody acts on it. A supervisor that *could not* answer kept the trigger true, and
+> the fifteen-minute floor between wakes cannot tell "nobody is watching" from "the one watching
+> has not finished". That is how an afternoon produced a screen full of terminals.
+
+---
+
 ## Fluid buttons
 
 The case that motivated them is small and completely real: Hermes needs Chrome listening on port
