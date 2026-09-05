@@ -404,9 +404,11 @@ public sealed class AgentSupervisor : IAsyncDisposable
         CancellationToken cancellationToken,
         TimeSpan? timeout = null)
     {
-        var arguments = agent.PromptArguments
-            .Select(a => a.Replace("{prompt}", prompt, StringComparison.Ordinal))
-            .ToList();
+        // Headless, so the bypass flag is part of the argv rather than a mode. There is no
+        // terminal here for anyone to approve anything in: a supervised round that stops at a
+        // permission prompt burns its whole timeout and comes back empty, which reads exactly like
+        // an agent that had nothing to say.
+        var arguments = agent.HeadlessArgumentsFor(prompt);
 
         return await ProcessLauncher.RunAsync(
             new LaunchRequest

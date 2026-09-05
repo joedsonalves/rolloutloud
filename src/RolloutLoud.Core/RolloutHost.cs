@@ -497,8 +497,11 @@ public sealed class RolloutHost
             Rationale =
                 $"This mission works in {where}, which is not the folder RolloutLoud is anchored to. " +
                 $"Clicking writes the mission block into {Path.Combine(where, agent.InstructionFile)} " +
-                $"— that file only, rewritten — and opens {agent.DisplayName} there" +
-                (mode == LaunchMode.Elevated ? " with its approval prompts off." : "."),
+                $"— that file only, rewritten — and opens {agent.DisplayName} there with its " +
+                "approval prompts off" +
+                (mode == LaunchMode.Elevated
+                    ? ", in a process with administrative rights."
+                    : ", in a process with the rights RolloutLoud itself has."),
             RequestedBy = mission.Mission.AgentId,
             MissionId = mission.Mission.Id,
         });

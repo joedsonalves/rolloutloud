@@ -160,6 +160,22 @@ invokes itself. One consent, recorded, at a moment you chose.
 > and the difference only shows up an hour later when a privileged command fails. That is why the
 > warning has three answers, not two: elevate and restart, launch anyway, or cancel.
 
+### Approval prompts are off in every session RolloutLoud opens
+
+Both buttons, the supervisor it wakes on its own, and every headless round — supervised or
+subagent — carry the CLI's own bypass flag. The two buttons differ in **OS rights**, not in
+prompting.
+
+That is not a shortcut, it is what the tool is. A session RolloutLoud opens is one you are not
+sitting in front of; a CLI that stops to ask permission in a window nobody is watching does
+nothing until somebody comes back, and on a headless round it burns the whole timeout and returns
+empty — which reads exactly like an agent that had nothing to say. The consent is opening
+RolloutLoud, once, and it is recorded.
+
+The flags live in `.rolloutloud/agents.json` and are yours to edit, including out. OpenClaw has
+none: its permission is persisted host state (`openclaw approvals`, `openclaw exec-policy`), set
+once by hand.
+
 ---
 
 ## Fluid buttons
