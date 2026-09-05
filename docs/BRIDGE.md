@@ -99,8 +99,7 @@ curl -X POST "$EP/v1/missions" -H "X-RolloutLoud-Token: $TK" -d '{
   "gateCommand": "dotnet test tests/Integration -c Release",
   "gateDescription": "green on Windows, twice in a row, with no skipped tests",
   "offload": "always",
-  "maxAttempts": 200,
-  "maxHours": 6
+  "maxAttempts": 200
 }'
 ```
 
@@ -270,8 +269,7 @@ are about to do is not a repeat.
 ### `GET /v1/missions/active/spend` — how much has this cost?
 
 ```json
-{ "usd": 0.56, "source": "measured", "capUsd": 5, "remainingUsd": 4.44,
-  "overBudget": false, "unpricedTokens": 0,
+{ "usd": 0.56, "source": "measured", "unpricedTokens": 0,
   "byModel": [ { "model": "claude-opus-5", "usd": 0.56,
                  "inputTokens": 2, "outputTokens": 504,
                  "cacheWriteTokens": 473, "cacheReadTokens": 341359 } ] }
@@ -281,12 +279,11 @@ Summed from your CLI's own transcript where one can be read, so `source: "measur
 API counted rather than a guess. `"estimated"` means nothing could be read and the figure is
 RolloutLoud pricing what it sent — **a floor**, since it cannot see what you read on your own.
 
-Ask it when you are choosing between a cheap experiment and an expensive one. Knowing you have
-spent eight of ten dollars is a better input to that choice than being stopped mid-thought by a cap
-you could not see coming.
+Ask it when you are choosing between a cheap experiment and an expensive one.
 
-⚠️ **It is a reading, not a lever.** Nothing here raises your own budget. Reaching `capUsd` ends the
-mission as `Exhausted` on your next `/continue`, and only the operator can raise it.
+⚠️ **It is a reading, and nothing more.** There is no spend cap — no figure here ends a mission, and
+there is no field to check against. `maxAttempts` is the only stop condition. The 200,000-token
+window ceiling still applies, but that hands the session over rather than stopping the run.
 
 ### Pointing a mission at another repository
 

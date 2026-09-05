@@ -278,7 +278,7 @@ rollout install [--no-open]      build and open, anchored here
 rollout open [--elevated]
 rollout status
 
-rollout mission "<objective>" --gate "<command>" --scope a,b --auth "<who authorised it>"  [--max-spend USD]
+rollout mission "<objective>" --gate "<command>" --scope a,b --auth "<who authorised it>"
                                            [--fourth-wall] [--deliverable <path>]
 rollout propose "<objective>" --gate "<command>" --why "<reasoning>"   you approve it before it runs
 rollout briefing ["<subagent task>"]
@@ -451,30 +451,26 @@ pending, since nothing is running it any more.
 **A finished mission is not resumable.** Achieved, exhausted or aborted, it is refused — quietly
 restarting one would undo a decision somebody made, including the gate's.
 
-## Stopping on money, not just on time
+## Knowing what a run cost
 
-`--max-attempts` counts moves and `--max-hours` counts minutes. Neither notices that a six-hour run
-with offload on can make a hundred cheap attempts or twenty expensive ones, and only one of those
-is a bill you would have agreed to in advance.
+There is no spend cap and no wall clock. `--max-attempts` is the only stop condition, and it counts
+the thing a mission is actually made of — moves. A run that a clock ended at hour six, or that a
+figure ended at $25, was stopped by a measure the work had nothing to do with, and the only move
+available was to raise the number and resume.
 
-```
-rollout mission "make the integration suite pass on Windows" \
-        --gate "dotnet test tests/Integration -c Release" \
-        --max-spend 25
-```
+What is left is the reading, which is what you wanted from it anyway:
 
 ```
 rollout spend
 ```
 
 ```json
-{ "usd": 0.56, "source": "measured", "capUsd": 25, "remainingUsd": 24.44,
+{ "usd": 0.56, "source": "measured",
   "byModel": [ { "model": "claude-opus-5", "usd": 0.56,
                  "outputTokens": 504, "cacheReadTokens": 341359 } ] }
 ```
 
-Reaching the cap ends the mission as `Exhausted` — the budget working, not the agent failing. Raise
-it and `rollout resume` if the work turned out to be worth more.
+Ask it when you are choosing between a cheap experiment and an expensive one. It never ends a run.
 
 ### Where the number comes from
 
@@ -485,17 +481,11 @@ window, because it was charged for.
 
 The four rates are kept apart on purpose. A long cached run is mostly cache reads, which are around
 a tenth of the input price; pricing them as input would overstate the bill by close to an order of
-magnitude, and a $50 cap would fire at $5 of real spend.
+magnitude.
 
 **Estimated**, from what RolloutLoud itself sent, when nothing can be read. It is a floor — it
 cannot see what the agent read on its own — and it is labelled an estimate everywhere it appears.
-
-⚠️ **The cap fires on either, and that is deliberate.** The offload threshold takes the opposite
-line and does nothing without a real reading, because acting on a guess there makes every action
-worse for the rest of the session. Money is not symmetric: failing open spends real money that
-cannot be got back, while failing closed costs one `rollout resume`. So the stop reason says which
-kind of number stopped you, and if the estimate looks high, raise the cap rather than distrusting
-the brake.
+The alternative was showing nothing, which reads as "this run was free".
 
 ### Prices age, so they live in a file
 
@@ -507,8 +497,12 @@ A model with **no** entry is priced at nothing rather than at a guess, and its t
 separately — `"unpricedTokens"` — so a bill never quietly leaves something out of a number you are
 trusting.
 
-Only Claude Code has a transcript RolloutLoud can read. The other three fall back to the estimate;
-adding a probe and adding a price for one of them is a single job, not two.
+Only Claude Code and Codex have a transcript RolloutLoud can read. The other two fall back to the
+estimate; adding a probe and adding a price for one of them is a single job, not two.
+
+⚠️ **The window ceiling is a different thing and it stays.** A session past 200,000 tokens is handed
+over to a fresh one — see *Knowing when the window got expensive*. That is a handover, not a stop:
+the mission carries on in a new session with its briefing.
 
 ---
 

@@ -362,7 +362,7 @@ internal static class Program
         {
             Console.Error.WriteLine("Usage: rollout mission \"<objective>\" [--agent claude] [--gate \"<cmd>\"] " +
                                     "[--scope a,b] [--auth \"<who authorised it>\"] [--offload always|threshold] " +
-                                    "[--max-attempts N] [--max-hours N] [--max-spend USD] " +
+                                    "[--max-attempts N] " +
                                     "[--fourth-wall] [--deliverable <path>]");
             return 1;
         }
@@ -386,16 +386,6 @@ internal static class Program
         if (int.TryParse(Option(args, "--max-attempts"), out var attempts))
         {
             payload["maxAttempts"] = attempts;
-        }
-
-        if (double.TryParse(Option(args, "--max-hours"), out var hours))
-        {
-            payload["maxHours"] = hours;
-        }
-
-        if (decimal.TryParse(SpendCap(args), out var spend))
-        {
-            payload["maxSpendUsd"] = spend;
         }
 
         if (args.Contains("--fourth-wall"))
@@ -525,8 +515,7 @@ internal static class Program
             Console.Error.WriteLine(
                 "Usage: rollout propose \"<objective>\" [--gate \"<command>\"] [--why \"<reasoning>\"]\n" +
                 "                       [--agent <id>] [--scope a,b] [--auth \"<who authorised it>\"]\n" +
-                "                       [--offload always|threshold] [--max-attempts N] [--max-hours N]\n" +
-                "                       [--max-spend USD]\n" +
+                "                       [--offload always|threshold] [--max-attempts N]\n" +
                 "                       [--no-wait]\n\n" +
                 "The gate is a command that must exit 0, and it should RE-DERIVE the result — a test,\n" +
                 "a build, the scan run again. A gate that checks a file you wrote is you marking your\n" +
@@ -564,16 +553,6 @@ internal static class Program
         if (int.TryParse(Option(args, "--max-attempts"), out var attempts))
         {
             payload["maxAttempts"] = attempts;
-        }
-
-        if (double.TryParse(Option(args, "--max-hours"), out var hours))
-        {
-            payload["maxHours"] = hours;
-        }
-
-        if (decimal.TryParse(SpendCap(args), out var spend))
-        {
-            payload["maxSpendUsd"] = spend;
         }
 
         var client = BridgeClient.Discover(paths);
@@ -999,18 +978,6 @@ internal static class Program
         return null;
     }
 
-    /// <summary>
-    /// The money cap, with the punctuation an operator naturally types taken off.
-    /// </summary>
-    /// <remarks>
-    /// ⚠️ Without this, <c>--max-spend $20</c> fails to parse and the mission runs with **no money
-    /// brake at all**, silently, while the operator believes they set one. Failing loudly on a
-    /// malformed cap would be acceptable; failing silently on a safety limit is not, so the two
-    /// obvious spellings — a dollar sign and a thousands comma — have to work.
-    /// </remarks>
-    private static string? SpendCap(string[] args) =>
-        Option(args, "--max-spend")?.Trim().TrimStart('$').Replace(",", string.Empty);
-
     private static string? Option(string[] args, string name)
     {
         for (var i = 0; i < args.Length - 1; i++)
@@ -1048,7 +1015,7 @@ internal static class Program
               rollout mission "<objective>" [--agent claude] [--gate "<command>"]
                                              [--scope a,b] [--auth "<who authorised it>"]
                                              [--offload always|threshold]
-                                             [--max-attempts N] [--max-hours N] [--max-spend USD]
+                                             [--max-attempts N]
                                              [--fourth-wall] [--deliverable <path>]
                                              [--at <folder>] [--elevated]
                                              --at points the agent at another repository: the
@@ -1082,7 +1049,7 @@ internal static class Program
                                              [--since ...] [--limit N] [--full]
                                              What has already been tried. Filtered and paged —
                                              there is no way to fetch the lot, on purpose.
-              rollout spend                    What this mission has cost so far, against its cap.
+              rollout spend                    What this mission has cost so far. A figure, not a cap.
               rollout launch                   Ask for a launch button on the active mission.
                                              Opens nothing: the operator clicks it, or you do if
                                              they delegated it for this mission.

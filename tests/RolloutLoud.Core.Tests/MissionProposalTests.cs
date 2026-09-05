@@ -222,12 +222,10 @@ public sealed class MissionProposalTests : IDisposable
             Scope = ["staging.example.com"],
             Authorization = "PO-4471",
             MaxAttempts = 40,
-            MaxHours = 2,
             Offload = "always",
         }).Id);
 
         Assert.Equal(40, engine!.Mission.Stop.MaxAttempts);
-        Assert.Equal(TimeSpan.FromHours(2), engine.Mission.Stop.MaxWallClock);
         Assert.Equal(OffloadTrigger.Always, engine.Mission.Offload.Trigger);
         Assert.Equal("PO-4471", engine.Mission.Scope.Authorization);
         Assert.False(engine.Mission.Scope.Unbounded);
@@ -239,7 +237,6 @@ public sealed class MissionProposalTests : IDisposable
         var engine = _host.AcceptProposal(_host.Propose(Draft()).Id);
 
         Assert.Equal(200, engine!.Mission.Stop.MaxAttempts);
-        Assert.Equal(TimeSpan.FromHours(6), engine.Mission.Stop.MaxWallClock);
         Assert.Equal(OffloadTrigger.Off, engine.Mission.Offload.Trigger);
         Assert.True(engine.Mission.Scope.Unbounded);
     }

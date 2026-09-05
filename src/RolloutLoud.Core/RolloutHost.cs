@@ -59,14 +59,9 @@ public sealed class RolloutHost
         foreach (var record in Store.LoadAll())
         {
             var ledger = new MissionLedger(record.Mission.Id, record.Attempts);
-            // ⚠️ Both hooks, and the second is easy to miss because this path uses an object
-            // initialiser while CreateMission assigns them one by one. Wiring only the new-mission
-            // path gives a money cap that works until RolloutLoud is restarted and then silently
-            // does not — on exactly the long runs a spend cap exists for.
             var engine = new MissionEngine(record.Mission, ledger, Store, paths)
             {
                 ReadContextTokens = id => TokensFor(id, WhereItWorks(record.Mission)),
-                ReadSpend = BudgetFor,
             };
 
             engine.EventLogged += e => MissionEventLogged?.Invoke(e);
@@ -120,7 +115,7 @@ public sealed class RolloutHost
         return reading.HasNumber ? reading.Tokens : null;
     }
 
-    /// <summary>What a mission has spent, and whether that is past its cap.</summary>
+    /// <summary>What a mission has cost so far. A figure for the operator, never a stop condition.</summary>
     public SpendMeter Spend { get; }
 
     /// <summary>
@@ -128,15 +123,23 @@ public sealed class RolloutHost
     /// </summary>
     /// <remarks>
     /// Exposed so no caller has to remember that the meter is per-directory. The bridge asking
-    /// <c>Spend.Evaluate(mission, anchor)</c> is how the wrong session got billed to a mission in
-    /// the first place, and a helper that cannot be called wrongly beats a comment asking people
+    /// <c>Spend.Read(mission.AgentId, anchor)</c> is how the wrong session got billed to a mission
+    /// in the first place, and a helper that cannot be called wrongly beats a comment asking people
     /// not to.
+    ///
+    /// Falls back to the estimate when no transcript can be read, so an agent without a probe still
+    /// gets a figure. It is a floor and <see cref="SpendReading.Summary"/> labels it one — silence
+    /// would read as "this run cost nothing", which is the one answer that is certainly wrong.
     /// </remarks>
-    public BudgetVerdict SpendOn(Mission mission) => Spend.Evaluate(mission, WhereItWorks(mission));
+    public SpendReading SpendReading(Mission mission)
+    {
+        var where = WhereItWorks(mission);
+        var measured = Spend.Read(mission.AgentId, where, mission.StartedAt);
 
-    /// <summary>The figure alone, for the window. Same rule about where it is read.</summary>
-    public SpendReading SpendReading(Mission mission) =>
-        Spend.Read(mission.AgentId, WhereItWorks(mission), mission.StartedAt);
+        return measured.HasNumber
+            ? measured
+            : Spend.Estimate(TokensFor(mission.AgentId, where) ?? 0);
+    }
 
     /// <summary>How much each Fourth Wall mission has kept from whoever is steering it.</summary>
     public FourthWallAudit Wall { get; } = new();
@@ -271,17 +274,6 @@ public sealed class RolloutHost
             }
         }
     }
-
-    /// <summary>
-    /// The money brake for one mission.
-    /// </summary>
-    /// <remarks>
-    /// The estimate handed in as a fallback is the context reading, which is what RolloutLoud knows
-    /// it sent. It is a floor and it is labelled one — but a floor that stops a run is better than
-    /// a cap that silently never fires, which is what an unmeasurable agent would otherwise get.
-    /// </remarks>
-    private BudgetVerdict BudgetFor(Mission mission) =>
-        Spend.Evaluate(mission, WhereItWorks(mission), TokensFor(mission.AgentId, WhereItWorks(mission)));
 
     /// <summary>What the last tidy found and removed. Shown in the window.</summary>
     public HousekeepingReport? LastHousekeeping { get; private set; }
@@ -618,7 +610,6 @@ public sealed class RolloutHost
         {
             engine = MissionEngine.Create(mission, Store, Paths);
             engine.ReadContextTokens = id => TokensFor(id, WhereItWorks(mission));
-            engine.ReadSpend = BudgetFor;
             _engines[mission.Id] = engine;
             ActiveMissionId = mission.Id;
         }

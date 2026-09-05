@@ -510,8 +510,6 @@ public sealed class BridgeServer : IAsyncDisposable
             ScopeExclusions = body.ScopeExclusions ?? [],
             Authorization = body.Authorization,
             MaxAttempts = body.MaxAttempts,
-            MaxHours = body.MaxHours,
-            MaxSpendUsd = body.MaxSpendUsd,
             Offload = body.Offload,
             Rationale = body.Rationale,
             Review = new GateReview { Findings = [], Headline = string.Empty },
@@ -684,8 +682,6 @@ public sealed class BridgeServer : IAsyncDisposable
             Stop = new StopConditions
             {
                 MaxAttempts = body.MaxAttempts is > 0 ? body.MaxAttempts.Value : 200,
-                MaxWallClock = TimeSpan.FromHours(body.MaxHours is > 0 ? body.MaxHours.Value : 6),
-                MaxSpendUsd = body.MaxSpendUsd is > 0m ? body.MaxSpendUsd : null,
             },
             Offload = new OffloadSettings
             {
@@ -1481,18 +1477,13 @@ public sealed class BridgeServer : IAsyncDisposable
     /// </remarks>
     private async Task SpendAsync(HttpListenerContext context, MissionEngine engine)
     {
-        var verdict = _host.SpendOn(engine.Mission);
-        var reading = verdict.Reading;
-        var cap = engine.Mission.Stop.MaxSpendUsd;
+        var reading = _host.SpendReading(engine.Mission);
 
         await WriteAsync(context, HttpStatusCode.OK, new
         {
             usd = reading.Usd,
             source = reading.Source.ToString().ToLowerInvariant(),
             detail = reading.Detail,
-            capUsd = cap,
-            remainingUsd = cap is null || !reading.HasNumber ? null : (decimal?)(cap.Value - reading.Usd),
-            overBudget = verdict.OverBudget,
             unpricedTokens = reading.UnpricedTokens,
             byModel = reading.ByModel.Select(m => new
             {
@@ -1503,11 +1494,9 @@ public sealed class BridgeServer : IAsyncDisposable
                 cacheWriteTokens = m.CacheWriteTokens,
                 cacheReadTokens = m.CacheReadTokens,
             }),
-            note = cap is null
-                ? "No money cap on this mission. The attempt and wall-clock caps still apply."
-                : reading.HasNumber
-                    ? "Spend it on the experiment most likely to move the gate, not the cheapest one."
-                    : "Nothing can read this agent's token counts, so the figure is what RolloutLoud sent.",
+            note = reading.HasNumber
+                ? "Spend is reported for diagnostics and does not stop the mission."
+                : "Nothing can read this agent's token counts.",
         }).ConfigureAwait(false);
     }
     /// <summary>

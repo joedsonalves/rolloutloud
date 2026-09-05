@@ -54,10 +54,6 @@ public sealed record MissionRequest
 
     public int? MaxAttempts { get; init; }
 
-    public double? MaxHours { get; init; }
-    /// <summary>Dollars this mission may spend before it stops. Absent means no money cap.</summary>
-    public decimal? MaxSpendUsd { get; init; }
-
     /// <summary>Deny whoever supervises this run its raw material. See <see cref="Missions.FourthWall"/>.</summary>
     public bool? FourthWall { get; init; }
 
@@ -108,10 +104,6 @@ public sealed record ProposalRequest
     public string? Offload { get; init; }
 
     public int? MaxAttempts { get; init; }
-
-    public double? MaxHours { get; init; }
-    /// <summary>Dollars this mission may spend before it stops. Absent means no money cap.</summary>
-    public decimal? MaxSpendUsd { get; init; }
 
     /// <summary>Deny whoever supervises this run its raw material. See <see cref="Missions.FourthWall"/>.</summary>
     public bool? FourthWall { get; init; }

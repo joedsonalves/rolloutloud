@@ -6,9 +6,9 @@ using Xunit;
 namespace RolloutLoud.Core.Tests;
 
 /// <summary>
-/// The attempt cap counts moves and the wall clock counts minutes. Neither notices that a six-hour
-/// run with offload on can make twenty expensive attempts instead of a hundred cheap ones, which is
-/// the only one of the three the operator feels.
+/// What a run costs, read from the agent's own transcript and priced from pricing.json. A figure
+/// the operator reads — never a stop condition, since the spend cap and the wall clock were both
+/// taken out. The arithmetic still has to be right: a bill nobody can trust is worse than none.
 /// </summary>
 public sealed class SpendTests : IDisposable
 {
@@ -251,14 +251,14 @@ public sealed class SpendTests : IDisposable
     [Fact]
     public void A_brand_new_mission_is_not_charged_for_the_session_that_preceded_it()
     {
-        // The same bug from the brake's side: the cap must not fire before the mission has spent
-        // anything, however large the window already was.
+        // Read from the mission's own start, not from now-minus-something. Turns burned before it
+        // opened belong to whatever the operator was doing beforehand, and billing them to the
+        // mission shows a run that has made no attempt yet already costing money.
         WriteTranscript("a.jsonl", Turn("claude-opus-4-5", 1_000_000, 0, 0, 0, "old"));
 
-        var mission = MissionWith(1m) with { StartedAt = DateTimeOffset.UtcNow.AddYears(1) };
-        var verdict = Meter().Evaluate(mission, Cwd, estimatedTokens: 900_000_000);
+        var mission = MissionWith() with { StartedAt = DateTimeOffset.UtcNow.AddYears(1) };
 
-        Assert.False(verdict.OverBudget);
+        Assert.Equal(0m, Meter().Read(mission.AgentId, Cwd, mission.StartedAt).Usd);
     }
 
     [Fact]
@@ -284,15 +284,15 @@ public sealed class SpendTests : IDisposable
         Assert.Equal(15m, new ClaudeCodeSpendProbe(_projects).TryRead(Cwd, TokenPrices.Default, null)!.Usd);
     }
 
-    // ---- the brake --------------------------------------------------------------------------
+    // ---- what the reading is, and what it no longer does ------------------------------------
 
-    private static Mission MissionWith(decimal? cap) => new()
+    private static Mission MissionWith() => new()
     {
         Id = "m1",
         Objective = "spend something",
         AgentId = "claude",
         StartedAt = DateTimeOffset.UtcNow.AddHours(-1),
-        Stop = new StopConditions { MaxSpendUsd = cap },
+        Stop = new StopConditions(),
     };
 
     private SpendMeter Meter() =>
@@ -304,79 +304,14 @@ public sealed class SpendTests : IDisposable
     private MissionStore Store() => new(Paths());
 
     [Fact]
-    public void No_cap_means_the_brake_never_fires()
-    {
-        WriteTranscript("a.jsonl", Turn("claude-opus-4-5", 100_000_000, 0, 0, 0, "r1"));
-
-        Assert.False(Meter().Evaluate(MissionWith(null), Cwd).OverBudget);
-        Assert.False(Meter().Evaluate(MissionWith(0m), Cwd).OverBudget);
-    }
-
-    [Fact]
-    public void Under_the_cap_the_run_carries_on()
+    public void A_measured_transcript_produces_a_figure_marked_measured()
     {
         WriteTranscript("a.jsonl", Turn("claude-opus-4-5", 100_000, 0, 0, 0, "r1"));
 
-        var verdict = Meter().Evaluate(MissionWith(50m), Cwd);
+        var reading = Meter().Read("claude", Cwd, DateTimeOffset.UtcNow.AddHours(-1));
 
-        Assert.False(verdict.OverBudget);
-        Assert.True(verdict.Reading.Usd > 0m);
-    }
-
-    [Fact]
-    public void Over_the_cap_it_stops_and_says_it_was_measured()
-    {
-        WriteTranscript("a.jsonl", Turn("claude-opus-4-5", 4_000_000, 0, 0, 0, "r1"));
-
-        var verdict = Meter().Evaluate(MissionWith(50m), Cwd);
-
-        Assert.True(verdict.OverBudget);
-        Assert.Contains("measured", verdict.Reason, StringComparison.Ordinal);
-        Assert.Contains("resume", verdict.Reason, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void With_no_transcript_the_cap_still_fires_and_says_it_was_a_guess()
-    {
-        // The decision worth defending, and it is the opposite of the context meter's. Failing open
-        // spends real money that cannot be got back; failing closed costs one `rollout resume`,
-        // which already exists. So the brake fires on whatever number it has — and the reason says
-        // which kind, so an operator who thinks it is high knows to raise the cap rather than to
-        // stop trusting the tool.
-        var meter = new SpendMeter(() => TokenPrices.Default, [new ClaudeCodeSpendProbe(Path.Combine(_root, "nowhere"))]);
-
-        var verdict = meter.Evaluate(MissionWith(1m), Cwd, estimatedTokens: 10_000_000);
-
-        Assert.True(verdict.OverBudget);
-        Assert.Contains("ESTIMATE", verdict.Reason, StringComparison.Ordinal);
-        Assert.False(verdict.Reading.IsMeasured);
-    }
-
-    [Fact]
-    public void A_cap_under_a_cent_is_not_rounded_into_reading_as_zero()
-    {
-        // ⚠️ Two decimals is right for money and wrong for this message: a $0.001 cap formatted as
-        // N2 says the run was stopped at a budget of "$0.00", which sends the operator hunting for
-        // a bug in the brake instead of looking at the figure they typed.
-        WriteTranscript("a.jsonl", Turn("claude-opus-4-5", 1_000_000, 0, 0, 0, "r1"));
-
-        var reason = Meter().Evaluate(MissionWith(0.001m), Cwd).Reason;
-
-        Assert.Contains("$0.001", reason, StringComparison.Ordinal);
-        Assert.DoesNotContain("of $0.00,", reason, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void The_measured_figure_wins_over_the_estimate_when_both_exist()
-    {
-        // An estimate standing in for a measurement that was available would be a worse number
-        // presented with the same confidence.
-        WriteTranscript("a.jsonl", Turn("claude-opus-4-5", 100_000, 0, 0, 0, "r1"));
-
-        var verdict = Meter().Evaluate(MissionWith(50m), Cwd, estimatedTokens: 900_000_000);
-
-        Assert.False(verdict.OverBudget);
-        Assert.True(verdict.Reading.IsMeasured);
+        Assert.True(reading.Usd > 0m);
+        Assert.True(reading.IsMeasured);
     }
 
     [Fact]
@@ -389,36 +324,67 @@ public sealed class SpendTests : IDisposable
     }
 
     [Fact]
-    public void The_engine_exhausts_the_mission_when_the_brake_fires()
+    public void An_expensive_run_is_not_stopped_by_what_it_cost()
     {
-        // The brake has to reach MissionState, not just print a warning — an over-budget run that
-        // keeps going is the failure this exists to prevent.
-        var mission = MissionWith(50m) with { State = MissionState.Running };
-        var engine = new MissionEngine(mission, new MissionLedger(mission.Id), Store(), Paths())
-        {
-            ReadSpend = _ => new BudgetVerdict
-            {
-                OverBudget = true,
-                Reason = "Spend cap reached: $60.00 of $50.00, measured.",
-                Reading = SpendReading.Unknown,
-            },
-        };
+        // ⚠️ The regression this file exists to catch now that the spend cap is gone. A cost that
+        // ends a run is a stop the operator did not choose in the terms the work is made of, and
+        // it hides well: the mission reads Exhausted with a plausible resolution either way.
+        WriteTranscript("a.jsonl", Turn("claude-opus-4-5", 100_000_000, 0, 0, 0, "r1"));
+
+        var mission = MissionWith() with { State = MissionState.Running };
+        var engine = new MissionEngine(mission, new MissionLedger(mission.Id), Store(), Paths());
 
         var decision = engine.ShouldContinue();
 
-        Assert.False(decision.Continue);
-        Assert.Equal(MissionState.Exhausted, engine.Mission.State);
-        Assert.Contains("$50.00", engine.Mission.Resolution!, StringComparison.Ordinal);
+        Assert.True(decision.Continue);
+        Assert.Equal(MissionState.Running, engine.Mission.State);
     }
 
     [Fact]
-    public void With_no_spend_hook_the_engine_behaves_as_it_always_did()
+    public void A_run_that_started_days_ago_is_not_stopped_by_the_clock()
     {
-        // Left null in a test — and on a machine where nothing can be read — the money cap simply
-        // does not exist rather than blocking the run.
-        var mission = MissionWith(50m) with { State = MissionState.Running };
+        // The other half of the same removal. A mission left running overnight is the case the
+        // wall clock used to end, and ending it is what the operator asked us to stop doing.
+        var mission = MissionWith() with
+        {
+            State = MissionState.Running,
+            StartedAt = DateTimeOffset.UtcNow.AddDays(-4),
+        };
+
         var engine = new MissionEngine(mission, new MissionLedger(mission.Id), Store(), Paths());
 
         Assert.True(engine.ShouldContinue().Continue);
+        Assert.Equal(MissionState.Running, engine.Mission.State);
     }
+
+    [Fact]
+    public void The_attempt_cap_is_the_one_stop_condition_left()
+    {
+        // Removing two brakes is only safe while the third still works. Without this the mission
+        // has nothing at all between it and a loop that never ends.
+        var mission = MissionWith() with
+        {
+            State = MissionState.Running,
+            Stop = new StopConditions { MaxAttempts = 2 },
+        };
+
+        var ledger = new MissionLedger(mission.Id);
+        ledger.Record(Tried("a1", "the obvious thing"));
+        ledger.Record(Tried("a2", "the next obvious thing"));
+
+        var engine = new MissionEngine(mission, ledger, Store(), Paths());
+
+        Assert.False(engine.ShouldContinue().Continue);
+        Assert.Equal(MissionState.Exhausted, engine.Mission.State);
+    }
+
+    private static Attempt Tried(string id, string hypothesis) => new()
+    {
+        Id = id,
+        MissionId = "m1",
+        AgentId = "claude",
+        Hypothesis = hypothesis,
+        Command = "cmd /c exit 1",
+        ExitCode = 1,
+    };
 }
