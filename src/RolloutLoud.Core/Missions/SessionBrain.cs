@@ -108,6 +108,18 @@ public sealed class SessionBrain
     }
 
     /// <summary>
+    /// Whether anything was handed over on this mission for this role.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Narrate"/> answers "you are the first on this" rather than nothing, which is the
+    /// right thing to hand an agent that asks — and the wrong thing to paste into a briefing, where
+    /// it becomes a section about the absence of a section. The caller composing a briefing asks
+    /// this first.
+    /// </remarks>
+    public bool HasAny(string missionId, string role) =>
+        Chain(missionId).Any(h => string.Equals(h.Role, role, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
     /// The chain as a fresh session should read it, newest last.
     /// </summary>
     /// <remarks>

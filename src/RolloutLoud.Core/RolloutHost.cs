@@ -150,6 +150,15 @@ public sealed class RolloutHost
     /// <summary>What each session handed over to the next. Survives a power cut.</summary>
     public SessionBrain Brain { get; }
 
+    /// <summary>The handover chain for a briefing, or null when this is the first session.</summary>
+    /// <remarks>
+    /// Null rather than "you are the first on this": in a briefing that sentence is a section about
+    /// the absence of a section, and every heading an agent reads costs it attention it could have
+    /// spent on the objective.
+    /// </remarks>
+    private string? HandoverFor(string missionId, string role) =>
+        Brain.HasAny(missionId, role) ? Brain.Narrate(missionId, role) : null;
+
     /// <summary>Which transcript belongs to which session, so a per-role ceiling reads its own.</summary>
     public SessionTrail Trail { get; }
 
@@ -798,7 +807,14 @@ public sealed class RolloutHost
         }
 
         var mayAnswer = Deputies.For(mission.Mission.Id) is not null;
-        var briefing = Offload.BriefingComposer.ForSupervisor(mission.Mission, mayAnswer, reason);
+        // ⚠️ Read back, which for a long time nothing did. Brain.Record had one caller and
+        // Brain.Chain had none outside its tests: every session wrote what it had come to believe
+        // into .rolloutloud/ and no successor ever saw a word of it.
+        var briefing = Offload.BriefingComposer.ForSupervisor(
+            mission.Mission,
+            mayAnswer,
+            reason,
+            HandoverFor(mission.Mission.Id, SupervisorRole));
 
         WriteBriefingSection(Path.Combine(Paths.RepositoryRoot, agent.InstructionFile), briefing);
 
@@ -903,7 +919,11 @@ public sealed class RolloutHost
 
         if (mission is not null)
         {
-            var briefing = Offload.BriefingComposer.ForMainSession(mission.Mission, mission.Ledger, HasAttachedIdentity);
+            var briefing = Offload.BriefingComposer.ForMainSession(
+                mission.Mission,
+                mission.Ledger,
+                HasAttachedIdentity,
+                HandoverFor(mission.Mission.Id, WorkerRole));
             var target = Path.Combine(workingDirectory, agent.InstructionFile);
             WriteBriefingSection(target, briefing);
 

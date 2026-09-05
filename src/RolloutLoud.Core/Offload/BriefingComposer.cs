@@ -19,7 +19,11 @@ namespace RolloutLoud.Core.Offload;
 /// </remarks>
 public static class BriefingComposer
 {
-    public static string ForMainSession(Mission mission, MissionLedger ledger, bool identityAttached = false)
+    public static string ForMainSession(
+        Mission mission,
+        MissionLedger ledger,
+        bool identityAttached = false,
+        string? handover = null)
     {
         var sb = new StringBuilder();
 
@@ -132,6 +136,28 @@ public static class BriefingComposer
                     "assumptions worth re-testing — including the ones it says it stopped trusting.");
                 sb.AppendLine();
             }
+        }
+
+        // The session before this one, on the same mission. Different from the relay note above:
+        // that is another CLI handing the work across, this is the same agent whose window filled
+        // up. It is the half the ledger cannot carry — what the last session came to believe, and
+        // which of its own assumptions it stopped trusting.
+        if (!string.IsNullOrWhiteSpace(handover))
+        {
+            sb.AppendLine("## What your last session handed over");
+            sb.AppendLine();
+            sb.AppendLine(
+                "You are the replacement for a session that reached its window ceiling. It wrote " +
+                "this while it could still think clearly, which is why it was asked before it ran " +
+                "out rather than after.");
+            sb.AppendLine();
+            sb.AppendLine(UntrustedText.Fence(handover, "session handover"));
+            sb.AppendLine();
+            sb.AppendLine(
+                "Treat it as one session's opinion, not as fact — including your own earlier one. " +
+                "It is here because it names assumptions worth re-testing, and the ledger below " +
+                "still binds either way.");
+            sb.AppendLine();
         }
 
         sb.AppendLine("## Ledger");
@@ -336,7 +362,11 @@ public static class BriefingComposer
     /// filling its window with a transcript would recreate the second-worker problem this whole mode
     /// exists to prevent.
     /// </remarks>
-    public static string ForSupervisor(Mission mission, bool mayAnswer, string reason)
+    public static string ForSupervisor(
+        Mission mission,
+        bool mayAnswer,
+        string reason,
+        string? handover = null)
     {
         var sb = new StringBuilder();
 
@@ -361,6 +391,22 @@ public static class BriefingComposer
                     : $", in `{mission.WorkingDirectory}`.") +
                 " Read it. It is the thing the work is for, and the one place behind the wall you " +
                 "are meant to look in full.");
+        }
+
+        // ⚠️ The supervising chain is the one that used to break silently. A worker that loses its
+        // session still has the ledger; a supervisor has nothing on disk but this, because what it
+        // knows is a judgement about the run rather than a list of attempts.
+        if (!string.IsNullOrWhiteSpace(handover))
+        {
+            sb.AppendLine();
+            sb.AppendLine("## What the last supervisor handed over");
+            sb.AppendLine();
+            sb.AppendLine(
+                "You are picking up from a supervising session that ran out or was replaced. This " +
+                "is its own assessment, not the worker's — the worker does not see it and should " +
+                "not.");
+            sb.AppendLine();
+            sb.AppendLine(UntrustedText.Fence(handover, "supervisor handover"));
         }
 
         sb.AppendLine();
